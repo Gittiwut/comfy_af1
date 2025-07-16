@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# ComfyUI specific
+/models/checkpoints/
+/models/clip/
+/models/controlnet/
+/models/diffusers/
+/models/embeddings/
+/models/loras/
+/models/upscale_models/
+/models/vae/
+/outputs/
+*.safetensors
+*.ckpt
+*.pth
+
+# Temporary files
+*.tmp
+*.log
