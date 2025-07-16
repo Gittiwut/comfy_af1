@@ -18,6 +18,10 @@ This is a ComfyUI development environment with Docker support.
 2. Build the Docker image
 3. Run the container
 
+## Version History
+
+- v1.0.0 - Initial release
+
 ## Note
 
 Model files and outputs are not included in this repository due to their large size.
