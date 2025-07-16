@@ -1,4 +1,7 @@
 torch
+torchvision
+torchaudio
+torchsde
 aiohttp
 safetensors
 huggingface_hub
@@ -14,7 +17,15 @@ packaging
 psutil
 accelerate
 typing-extensions
-torchvision
 scipy
-torchaudio
-torchsde
+opencv-python-headless
+matplotlib
+jupyterlab
+notebook
+ipywidgetskornia
+spandrel
+soundfile
+diffusers
+omegaconf
+comfy-cli
+websocket-client

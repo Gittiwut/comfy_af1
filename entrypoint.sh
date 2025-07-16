@@ -53,13 +53,15 @@ restore_backup() {
   rm -rf "$TEMP_BACKUP_DIR"
 }
 
-# ✅ ติดตั้ง comfyui-frontend-package ถ้ายังไม่มี
-if ! python3 -c "import comfyui_frontend_package" &>/dev/null; then
-  echo "[ENTRYPOINT] Installing comfyui-frontend-package into $PYTHON_MODULE_DIR ..."
-  pip install --no-cache-dir --target="$PYTHON_MODULE_DIR" comfyui-frontend-package
-else
-  echo "[ENTRYPOINT] comfyui-frontend-package already available."
-fi
+# ✅ ติดตั้ง essential packages
+echo "[ENTRYPOINT] Installing essential packages..."
+ESSENTIAL_PACKAGES="comfy-cli websocket-client aiohttp"
+for package in $ESSENTIAL_PACKAGES; do
+  if ! python3 -c "import ${package//-/_}" &>/dev/null 2>&1; then
+    echo "[ENTRYPOINT] Installing $package..."
+    pip install --no-cache-dir "$package"
+  fi
+done
 
 # ✅ บันทึก base file list ComfyUI
 if [ ! -f "$BASE_FILE_LIST" ]; then
@@ -177,29 +179,58 @@ else
   echo "[PRELOAD] Skipping custom_nodes preload: $CUSTOM_NODE_DIR not found."
 fi
 
-# ✅ รัน JupyterLab แยก background แบบไม่ไปรบกวน process หลัก
+# ✅ รัน JupyterLab แยก background
+echo "[ENTRYPOINT] Starting JupyterLab..."
+mkdir -p /mnt/netdrive/notebooks
+
+# Kill any existing Jupyter processes
+pkill -f jupyter || true
+
 nohup jupyter lab \
     --ip=0.0.0.0 \
     --port=8888 \
     --allow-root \
     --no-browser \
-    --ServerApp.root_dir="/mnt/netdrive" \
+    --notebook-dir="/mnt/netdrive" \
     --ServerApp.token="" \
     --ServerApp.password="" \
     --ServerApp.allow_origin="*" \
+    --ServerApp.allow_remote_access=True \
     --ServerApp.disable_check_xsrf=True \
+    --KernelManager.cull_idle_timeout=0 \
     > /mnt/netdrive/jupyter.log 2>&1 &
+
+JUPYTER_PID=$!
 
 sleep 5
 
-if pgrep -f "jupyter lab" > /dev/null; then
-    echo "[ENTRYPOINT] JupyterLab started successfully"
-    echo "[ENTRYPOINT] Log file: /mnt/netdrive/jupyter.log"
+if kill -0 $JUPYTER_PID 2>/dev/null; then
+    echo "[ENTRYPOINT] ✅ JupyterLab started successfully (PID: $JUPYTER_PID)"
+    echo "[ENTRYPOINT] Access at: http://localhost:8888"
 else
-    echo "[ENTRYPOINT] Failed to start JupyterLab"
-    echo "[ENTRYPOINT] Check log file: /mnt/netdrive/jupyter.log"
+    echo "[ENTRYPOINT] ❌ Failed to start JupyterLab"
+    echo "[ENTRYPOINT] Error log:"
+    tail -n 20 /mnt/netdrive/jupyter.log
 fi
 
 # ✅ ให้ ComfyUI เป็น process หลัก (PID 1)
 echo "[ENTRYPOINT] Starting ComfyUI..."
-exec python3 "$COMFYUI_DIR/main.py" --listen 0.0.0.0 --port 8188
+echo "[ENTRYPOINT] ComfyUI will be available at: http://localhost:8188"
+
+# Create web directory if missing
+mkdir -p "$COMFYUI_DIR/web"
+
+# Check if ComfyUI files exist
+if [ ! -f "$COMFYUI_DIR/main.py" ]; then
+    echo "[ERROR] ComfyUI main.py not found!"
+    echo "[ERROR] Directory contents:"
+    ls -la "$COMFYUI_DIR"
+    exit 1
+fi
+
+# Start ComfyUI with error logging
+exec python3 "$COMFYUI_DIR/main.py" \
+    --listen 0.0.0.0 \
+    --port 8188 \
+    --preview-method auto \
+    2>&1 | tee /mnt/netdrive/comfyui.log

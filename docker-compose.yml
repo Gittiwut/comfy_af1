@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  comfyui:
+    build: .
+    container_name: comfyui-runpod
+    ports:
+      - "8188:8188"  # ComfyUI
+      - "8888:8888"  # JupyterLab
+    volumes:
+      - ./models:/mnt/netdrive/comfyui/models
+      - ./outputs:/mnt/netdrive/comfyui/output
+      - ./workflows:/mnt/netdrive/comfyui/workflows
+      - ./custom_nodes:/mnt/netdrive/comfyui/custom_nodes
+      - ./notebooks:/mnt/netdrive/notebooks
+    environment:
+      - COMFYUI_ROOT=/mnt/netdrive/comfyui
+    restart: unless-stopped
