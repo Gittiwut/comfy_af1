@@ -11,11 +11,19 @@ ENV COMFYUI_ROOT=/mnt/netdrive/comfyui \
     DEBIAN_FRONTEND=noninteractive \
     PATH="/mnt/netdrive/python_env/bin:/root/.cargo/bin:${PATH}" \
     NVIDIA_VISIBLE_DEVICES=all \
-    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    TMPDIR=/mnt/netdrive/tmp
 
 # Set ComfyUI root path
 WORKDIR /mnt/netdrive/comfyui
 
+# Create necessary directories
+RUN mkdir -p /mnt/netdrive/comfyui \
+             /mnt/netdrive/python_env \
+             /mnt/netdrive/config/jupyter \
+             /mnt/netdrive/tools \
+             /mnt/netdrive/tmp
+             
 # ติดตั้ง system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
@@ -31,6 +39,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-venv \
     python3-dev \
+    aria2 \
+    && python3 -m pip install --upgrade pip \
     && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -40,16 +50,20 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     cp /root/.local/bin/uv /usr/local/bin/ && \
     /usr/local/bin/uv --version
 
-# Create necessary directories
-RUN mkdir -p /mnt/netdrive/comfyui \
-             /mnt/netdrive/python_env \
-             /mnt/netdrive/config/jupyter \
-             /mnt/netdrive/tools
-
 # Copy files
 COPY requirements.txt /requirements.txt
 COPY entrypoint.sh /entrypoint.sh
 COPY comfyui_wrapper.py /comfyui_wrapper.py
+COPY custom_nodes_list.json /custom_nodes_list.json
+COPY setup_custom_nodes.py /setup_custom_nodes.py
+COPY download_models.py /download_models.py
+COPY models_config.json /models_config.json
+
+# Debug: ตรวจสอบว่าไฟล์ถูก copy หรือไม่
+RUN echo "[DEBUG] Files copied to root:" && \
+    ls -la / && \
+    echo "[DEBUG] Checking setup_custom_nodes.py:" && \
+    ls -la /setup_custom_nodes.py
 
 # Set permissions
 RUN chmod +x /entrypoint.sh
@@ -62,5 +76,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8188/ || exit 1
 
 # Set entrypoint
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
 CMD []

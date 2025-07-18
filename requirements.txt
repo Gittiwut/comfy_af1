@@ -14,3 +14,4 @@ requests
 psutil
 scipy
 comfyui-frontend-package
+urllib3<2.0.0

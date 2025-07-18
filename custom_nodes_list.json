@@ -1,0 +1,56 @@
+{
+  "ComfyUI-Manager": [
+    "https://github.com/ltdrdata/ComfyUI-Manager.git"
+  ],
+  "ComfyUI-Impact-Pack": [
+    "https://github.com/ltdrdata/ComfyUI-Impact-Pack.git"
+  ],
+  "ComfyUI_essentials": [
+    "https://github.com/cubiq/ComfyUI_essentials.git"
+  ],
+  "ComfyUI-Inspire-Pack": [
+    "https://github.com/ltdrdata/ComfyUI-Inspire-Pack.git"
+  ],
+  "comfyui_controlnet_aux": [
+    "https://github.com/Fannovel16/comfyui_controlnet_aux.git"
+  ],
+  "DZ-FaceDetailer": [
+    "https://github.com/nicofdga/DZ-FaceDetailer.git"
+  ],
+  "ComfyUI_IPAdapter_plus": [
+    "https://github.com/cubiq/ComfyUI_IPAdapter_plus.git"
+  ],
+  "ComfyUI_UltimateSDUpscale": [
+    "https://github.com/ssitu/ComfyUI_UltimateSDUpscale.git"
+  ],
+  "ComfyUI-VideoHelperSuite": [
+    "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git"
+  ],
+  "comfyui-inpaint-nodes": [
+    "https://github.com/Acly/comfyui-inpaint-nodes.git"
+  ],
+  "ComfyUI-KJNodes": [
+    "https://github.com/kijai/ComfyUI-KJNodes.git"
+  ],
+  "ComfyUI-GGUF": [
+    "https://github.com/city96/ComfyUI-GGUF.git"
+  ],
+  "rgthree-comfy": [
+    "https://github.com/rgthree/rgthree-comfy.git"
+  ],
+  "ComfyUI_Custom_Nodes_AlekPet": [
+    "https://github.com/AlekPet/ComfyUI_Custom_Nodes_AlekPet.git"
+  ],
+  "ComfyUI-Gemini-API": [
+    "https://github.com/CY-CHENYUE/ComfyUI-Gemini-API.git"
+  ],
+  "ComfyUI-RED-UNO": [
+    "https://github.com/QijiTec/ComfyUI-RED-UNO.git"
+  ],
+  "Bjornulf_custom_nodes": [
+    "https://github.com/justUmen/Bjornulf_custom_nodes.git"
+  ],
+  "ComfyUI-Custom-Scripts": [
+    "https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git"
+  ]
+}
