@@ -30,6 +30,7 @@ export PATH="${VENV_PATH}/bin:${PATH}"
 
 # ตั้งค่า TMPDIR ก่อนรัน Debug
 mkdir -p /mnt/netdrive/tmp
+export TMPDIR=/mnt/netdrive/tmp
 
 # Debug TMPDIR Directory
 echo "[DEBUG] TMPDIR Directory:"
@@ -51,7 +52,11 @@ fi
 export TMPDIR=/mnt/netdrive/tmp
 echo "[DEBUG] TMPDIR set to: $TMPDIR"
 
-# ติดตั้ง dependencies จาก requirements.txt
+# ติดตั้ง aiohttp และ aiofiles
+echo "[SETUP] Installing parallel processing dependencies..."
+uv pip install --python=${VENV_PATH}/bin/python --no-cache aiohttp aiofiles
+
+# ติดตั้ง dependencies จาก requirements.txt แบบ parallel
 if [ -f "/requirements.txt" ]; then
     echo "[SETUP] Installing dependencies from requirements.txt..."
     uv pip install --python=${VENV_PATH}/bin/python --no-cache -r /requirements.txt
@@ -69,7 +74,7 @@ if [ ! -f "${VENV_PATH}/bin/jupyter" ]; then
     echo "[DEBUG] Disk usage after Jupyter install:"
     df -h /
     df -h /mnt/netdrive
-  fi
+fi
 
 # Create Jupyter config
 export JUPYTER_CONFIG_DIR=${JUPYTER_CONFIG_DIR}
@@ -127,7 +132,33 @@ fi
 # ติดตั้ง ComfyUI requirements (ถ้ามี)
 if [ -f "$COMFYUI_DIR/requirements.txt" ]; then
     echo "[SETUP] Installing ComfyUI requirements..."
-    uv pip install --python=${VENV_PATH}/bin/python --no-cache -r "$COMFYUI_DIR/requirements.txt"
+    echo "[DEBUG] Starting ComfyUI requirements installation at $(date)"
+    echo "[DEBUG] Requirements file size: $(wc -l < "$COMFYUI_DIR/requirements.txt") lines"
+    
+    # เพิ่ม Network Check
+    echo "[DEBUG] Network connectivity check..."
+    if curl -s --connect-timeout 5 --max-time 10 https://pypi.org/simple/ > /dev/null; then
+        echo "[DEBUG] Network connectivity: OK (PyPI accessible)"
+    elif curl -s --connect-timeout 5 --max-time 10 https://github.com > /dev/null; then
+        echo "[DEBUG] Network connectivity: OK (GitHub accessible)"
+    else
+        echo "[DEBUG] Network connectivity: SLOW/FAILED"
+    fi
+    
+    # เพิ่ม DNS check
+    echo "[DEBUG] DNS resolution check..."
+    if nslookup pypi.org > /dev/null 2>&1; then
+        echo "[DEBUG] DNS resolution: OK"
+    else
+        echo "[DEBUG] DNS resolution: FAILED"
+    fi
+
+    # เพิ่ม progress indicator
+    uv pip install --python=${VENV_PATH}/bin/python --no-cache -r "$COMFYUI_DIR/requirements.txt" 2>&1 | while IFS= read -r line; do
+        echo "[REQ_PROGRESS] $line"
+    done
+    
+    echo "[DEBUG] ComfyUI requirements installation completed at $(date)"
     echo "[DEBUG] Disk usage after ComfyUI requirements install:"
     df -h /
     df -h /mnt/netdrive
@@ -162,21 +193,91 @@ else
     echo "[DEBUG] Current working directory: $(pwd)"
 fi
 
-# Custom Nodes & Models Setup
-python3 /setup_custom_nodes.py
-echo "[DEBUG] Disk usage after setup_custom_nodes.py:"
-df -h /
+# Custom Nodes & Models Setup - รันแบบ parallel
+echo "[SETUP] Starting parallel custom nodes and models setup..."
+echo "[DEBUG] Pre-setup check at $(date)"
+echo "[DEBUG] Available disk space:"
 df -h /mnt/netdrive
-# Clean up temp after custom nodes setup
-echo "[CLEANUP] Cleaning up /mnt/netdrive/tmp after custom nodes setup..."
-rm -rf /mnt/netdrive/tmp/* || true
+echo "[DEBUG] Memory usage:"
+free -h
+echo "[DEBUG] Network status:"
+ping -c 2 8.8.8.8 > /dev/null && echo "[DEBUG] Network: OK" || echo "[DEBUG] Network: SLOW"
 
-python3 /download_models.py
-echo "[DEBUG] Disk usage after download_models.py:"
+# เพิ่ม progress monitoring สำหรับ custom nodes
+echo "[SETUP] Starting custom nodes setup..."
+timeout 300 python3 /setup_custom_nodes.py &
+CUSTOM_NODES_PID=$!
+echo "[SETUP] Starting models download..."
+timeout 300 python3 /download_models.py &
+DOWNLOAD_MODELS_PID=$!
+
+# เพิ่ม enhanced monitoring
+echo "[DEBUG] Enhanced monitoring started..."
+monitor_start_time=$(date +%s)
+while true; do
+    current_time=$(date +%s)
+    elapsed=$((current_time - monitor_start_time))
+    
+    # Check if processes are still running
+    if ! kill -0 $CUSTOM_NODES_PID 2>/dev/null && ! kill -0 $DOWNLOAD_MODELS_PID 2>/dev/null; then
+        echo "[DEBUG] All processes completed after ${elapsed}s"
+        break
+    fi
+    
+    # Force kill after 4 minutes
+    if [ $elapsed -gt 240 ]; then
+        echo "[DEBUG] Force killing processes after ${elapsed}s"
+        kill -9 $CUSTOM_NODES_PID 2>/dev/null || true
+        kill -9 $DOWNLOAD_MODELS_PID 2>/dev/null || true
+        break
+    fi
+    
+    echo "[DEBUG] Processes still running at $(date) (${elapsed}s elapsed)"
+    echo "[DEBUG] Custom nodes PID: $CUSTOM_NODES_PID"
+    echo "[DEBUG] Download models PID: $DOWNLOAD_MODELS_PID"
+    
+    # Show process status
+    if kill -0 $CUSTOM_NODES_PID 2>/dev/null; then
+        echo "[DEBUG] Custom nodes process is alive"
+    fi
+    if kill -0 $DOWNLOAD_MODELS_PID 2>/dev/null; then
+        echo "[DEBUG] Download models process is alive"
+    fi
+    
+    sleep 5
+done
+
+# รอให้ทั้งสอง process เสร็จ
+wait $CUSTOM_NODES_PID $DOWNLOAD_MODELS_PID 2>/dev/null || true
+echo "[DEBUG] All parallel processes completed at $(date)"
+
+# เพิ่ม Process Cleanup
+echo "[CLEANUP] Starting process cleanup..."
+echo "[DEBUG] Checking for zombie processes..."
+ps aux | grep -E "(python|uv|pip)" | grep -v grep || echo "[DEBUG] No zombie processes found"
+
+# Kill any remaining background processes
+echo "[CLEANUP] Cleaning up background processes..."
+pkill -f "setup_custom_nodes.py" 2>/dev/null || true
+pkill -f "download_models.py" 2>/dev/null || true
+pkill -f "uv pip install" 2>/dev/null || true
+
+# Clean up temp files
+echo "[CLEANUP] Cleaning up temporary files..."
+find /tmp -name "*.tmp" -delete 2>/dev/null || true
+find /mnt/netdrive/tmp -name "*.tmp" -delete 2>/dev/null || true
+
+# Memory cleanup
+echo "[CLEANUP] Memory cleanup..."
+sync
+echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+
+echo "[DEBUG] Disk usage after parallel setup:"
 df -h /
 df -h /mnt/netdrive
-# Clean up temp after model download
-echo "[CLEANUP] Cleaning up /mnt/netdrive/tmp after model download..."
+
+# Clean up temp after setup
+echo "[CLEANUP] Cleaning up /mnt/netdrive/tmp after setup..."
 rm -rf /mnt/netdrive/tmp/* || true
 
 # Check GPU availability
@@ -199,35 +300,6 @@ if torch.cuda.is_available():
 else:
     print('No CUDA devices found')
 "
-
-# === [Custom Nodes & Models Setup] ===
-CUSTOM_NODES_JSON="/custom_nodes_list.json"
-if [ -f "$CUSTOM_NODES_JSON" ]; then
-  echo "[SETUP] Cloning custom nodes from $CUSTOM_NODES_JSON ..."
-  cd "$COMFYUI_DIR/custom_nodes"
-  python3 -c "
-import json, subprocess
-with open('$CUSTOM_NODES_JSON') as f:
-    nodes = json.load(f)
-for name, repos in nodes.items():
-    for repo in repos:
-        folder = name
-        print(f'Cloning {repo} into {folder} ...')
-        subprocess.run(['git', 'clone', '--depth=1', repo, folder])
-"
-  # ติดตั้ง dependencies ของ custom nodes
-  find "$COMFYUI_DIR/custom_nodes" -name "requirements.txt" -exec uv pip install --python=${VENV_PATH}/bin/python --no-cache -r {} \;
-else
-  echo "[WARNING] $CUSTOM_NODES_JSON not found, skipping custom nodes setup."
-fi
-
-MODELS_CONFIG_JSON="/models_config.json"
-if [ -f "$MODELS_CONFIG_JSON" ]; then
-  echo "[SETUP] Downloading models from $MODELS_CONFIG_JSON ..."
-  python3 /download_models.py --config "$MODELS_CONFIG_JSON" --base "$COMFYUI_DIR/models"
-else
-  echo "[WARNING] $MODELS_CONFIG_JSON not found, skipping model download."
-fi
 
 # Change to ComfyUI directory
 cd "$COMFYUI_DIR"
@@ -256,13 +328,31 @@ if command -v nvidia-smi &> /dev/null; then
   nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits
 fi
 
+# เพิ่ม Pre-startup check และ timeout monitoring
+echo "[DEBUG] Pre-startup check at $(date)"
+echo "[DEBUG] GPU memory before start:"
+if command -v nvidia-smi &> /dev/null; then
+  nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits
+fi
+
 echo "[ENTRYPOINT] Starting ComfyUI with args: ${ARGS[*]}"
 
 # Copy wrapper script to ComfyUI directory
 cp /comfyui_wrapper.py "$COMFYUI_DIR/comfyui_wrapper.py"
 
-# Start ComfyUI in background
-python3 "$COMFYUI_DIR/comfyui_wrapper.py" "${ARGS[@]}" &
+# เพิ่ม timeout สำหรับ ComfyUI startup
+timeout 300 python3 "$COMFYUI_DIR/comfyui_wrapper.py" "${ARGS[@]}" &
+COMFYUI_PID=$!
+
+# Monitor startup
+echo "[DEBUG] Monitoring ComfyUI startup..."
+for i in {1..60}; do
+    if curl -s http://localhost:8188 > /dev/null 2>&1; then
+        echo "[DEBUG] ComfyUI started successfully after ${i}s"
+        break
+    fi
+    sleep 1
+done
 
 # Wait for all background jobs
 wait

@@ -9,9 +9,9 @@ huggingface_hub
 xformers
 transformers
 numpy
-aiohttp
 requests
 psutil
 scipy
 comfyui-frontend-package
 urllib3<2.0.0
+onnxruntime-gpu

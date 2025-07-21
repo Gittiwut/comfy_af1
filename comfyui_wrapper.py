@@ -10,6 +10,7 @@ import importlib
 import os
 import signal
 import time
+import threading
 
 # List of optional modules that can be auto-installed
 OPTIONAL_MODULES = [
@@ -132,6 +133,7 @@ def run_comfyui_with_retry(args, max_retries=3):
             # Monitor output for missing module errors and progress
             line_count = 0
             start_time = time.time()
+            startup_complete = False
             
             while True:
                 line = process.stdout.readline()
@@ -141,15 +143,20 @@ def run_comfyui_with_retry(args, max_retries=3):
                 line_count += 1
                 elapsed = time.time() - start_time
                 
-                # Print progress every 10 lines or 30 seconds
-                if line_count % 10 == 0 or elapsed > 30:
+                # Print progress every 20 lines or 60 seconds (ลดความถี่)
+                if line_count % 20 == 0 or elapsed > 60:
                     print(f"[WRAPPER] Progress: {line_count} lines, {elapsed:.1f}s elapsed")
                 
                 print(line.rstrip())
                 
-                # Check for startup completion indicators
-                if "Starting server" in line or "Server started" in line:
-                    print(f"[WRAPPER] ✅ ComfyUI server started successfully after {elapsed:.1f}s")
+                # Check for startup completion indicators (เพิ่ม indicators)
+                if any(indicator in line for indicator in [
+                    "Starting server", "Server started", "Serving on", 
+                    "ComfyUI startup time", "Total VRAM", "Device: cuda"
+                ]):
+                    if not startup_complete:
+                        print(f"[WRAPPER] ✅ ComfyUI server started successfully after {elapsed:.1f}s")
+                        startup_complete = True
                 
                 # Check for missing module error
                 if "No module named" in line:

@@ -23,32 +23,21 @@ RUN mkdir -p /mnt/netdrive/comfyui \
              /mnt/netdrive/config/jupyter \
              /mnt/netdrive/tools \
              /mnt/netdrive/tmp
-             
+
 # ติดตั้ง system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    wget \
-    ca-certificates \
-    software-properties-common \
-    build-essential \
-    libgl1-mesa-dev \
-    libglib2.0-0 \
-    ffmpeg \
-    python3 \
-    python3-pip \
-    python3-venv \
-    python3-dev \
-    aria2 \
-    && python3 -m pip install --upgrade pip \
+    git curl wget ca-certificates \
+    build-essential software-properties-common libgl1-mesa-dev \
+    libglib2.0-0 ffmpeg aria2 \
+    python3 python3-pip python3-venv python3-dev \
     && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # ติดตั้ง UV
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    cp /root/.local/bin/uv /usr/local/bin/ && \
-    /usr/local/bin/uv --version
+cp /root/.local/bin/uv /usr/local/bin/ && \
+/usr/local/bin/uv --version
 
 # Copy files
 COPY requirements.txt /requirements.txt
