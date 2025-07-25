@@ -6,9 +6,15 @@ import shutil
 import tempfile
 import aiohttp
 import aiofiles
+from urllib.parse import urlparse
 
 # เพิ่ม concurrency limit
 MAX_CONCURRENT_DOWNLOADS = 8
+
+def get_filename_from_url(url):
+    path = urlparse(url).path
+    filename = os.path.basename(path)
+    return filename
 
 def check_aria2c():
     if shutil.which("aria2c") is None:
@@ -24,7 +30,7 @@ os.makedirs(TMPDIR, exist_ok=True)
 os.environ["TMPDIR"] = TMPDIR
 
 async def download_with_aria2c(url, dest_dir):
-    filename = url.split("/")[-1]
+    filename = get_filename_from_url(url)
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / filename
     if dest.exists():
@@ -81,11 +87,11 @@ async def download_models_parallel(config, base_dir):
     for category, urls in config.items():
         cat_dir = base_dir / category
         for url in urls:
+            filename = get_filename_from_url(url)
+            dest = cat_dir / filename
             if aria2c_available:
                 download_tasks.append(download_with_aria2c(url, cat_dir))
             else:
-                filename = url.split("/")[-1]
-                dest = cat_dir / filename
                 download_tasks.append(download_with_aiohttp(url, dest))
     
     # ใช้ semaphore เพื่อจำกัด concurrency
