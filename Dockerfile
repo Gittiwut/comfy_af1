@@ -42,7 +42,6 @@ cp /root/.local/bin/uv /usr/local/bin/ && \
 # Copy files
 COPY requirements.txt /requirements.txt
 COPY entrypoint.sh /entrypoint.sh
-COPY comfyui_wrapper.py /comfyui_wrapper.py
 COPY custom_nodes_list.json /custom_nodes_list.json
 COPY setup_custom_nodes.py /setup_custom_nodes.py
 COPY download_models.py /download_models.py

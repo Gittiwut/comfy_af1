@@ -16,3 +16,4 @@ comfyui-frontend-package
 urllib3<2.0.0
 onnxruntime-gpu
 piexif
+segment_anything

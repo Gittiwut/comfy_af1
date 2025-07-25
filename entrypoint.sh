@@ -144,14 +144,6 @@ if [ -f "$COMFYUI_DIR/requirements.txt" ]; then
     else
         echo "[DEBUG] Network connectivity: SLOW/FAILED"
     fi
-    
-    # เพิ่ม DNS check
-    echo "[DEBUG] DNS resolution check..."
-    if nslookup pypi.org > /dev/null 2>&1; then
-        echo "[DEBUG] DNS resolution: OK"
-    else
-        echo "[DEBUG] DNS resolution: FAILED"
-    fi
 
     # เพิ่ม progress indicator
     uv pip install --python=${VENV_PATH}/bin/python --no-cache -r "$COMFYUI_DIR/requirements.txt" 2>&1 | while IFS= read -r line; do
@@ -200,15 +192,14 @@ echo "[DEBUG] Available disk space:"
 df -h /mnt/netdrive
 echo "[DEBUG] Memory usage:"
 free -h
-echo "[DEBUG] Network status:"
-ping -c 2 8.8.8.8 > /dev/null && echo "[DEBUG] Network: OK" || echo "[DEBUG] Network: SLOW"
+#echo "[DEBUG] Network status:"
 
-# เพิ่ม progress monitoring สำหรับ custom nodes
+# Add log file for custom nodes and models setup
 echo "[SETUP] Starting custom nodes setup..."
-timeout 300 python3 /setup_custom_nodes.py &
+python3 /setup_custom_nodes.py > /mnt/netdrive/comfyui/setup_custom_nodes.log 2>&1 &
 CUSTOM_NODES_PID=$!
 echo "[SETUP] Starting models download..."
-timeout 300 python3 /download_models.py &
+python3 /download_models.py > /mnt/netdrive/comfyui/download_models.log 2>&1 &
 DOWNLOAD_MODELS_PID=$!
 
 # เพิ่ม enhanced monitoring
@@ -221,14 +212,6 @@ while true; do
     # Check if processes are still running
     if ! kill -0 $CUSTOM_NODES_PID 2>/dev/null && ! kill -0 $DOWNLOAD_MODELS_PID 2>/dev/null; then
         echo "[DEBUG] All processes completed after ${elapsed}s"
-        break
-    fi
-    
-    # Force kill after 4 minutes
-    if [ $elapsed -gt 240 ]; then
-        echo "[DEBUG] Force killing processes after ${elapsed}s"
-        kill -9 $CUSTOM_NODES_PID 2>/dev/null || true
-        kill -9 $DOWNLOAD_MODELS_PID 2>/dev/null || true
         break
     fi
     
@@ -288,19 +271,6 @@ else
   echo "[ENTRYPOINT] No GPU detected, running in CPU mode"
 fi
 
-# Check PyTorch CUDA availability
-echo "[ENTRYPOINT] Checking PyTorch CUDA availability..."
-python3 -c "
-import torch
-print(f'PyTorch version: {torch.__version__}')
-print(f'CUDA available: {torch.cuda.is_available()}')
-if torch.cuda.is_available():
-    print(f'CUDA device count: {torch.cuda.device_count()}')
-    print(f'CUDA device name: {torch.cuda.get_device_name(0)}')
-else:
-    print('No CUDA devices found')
-"
-
 # Change to ComfyUI directory
 cd "$COMFYUI_DIR"
 
@@ -324,35 +294,38 @@ fi
 
 # Show memory usage before start
 if command -v nvidia-smi &> /dev/null; then
-  echo "[ENTRYPOINT] GPU Memory before start:"
+  echo "[ENTRYPOINT] GPU Memory before start at $(date):"
   nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits
 fi
 
-# เพิ่ม Pre-startup check และ timeout monitoring
-echo "[DEBUG] Pre-startup check at $(date)"
-echo "[DEBUG] GPU memory before start:"
-if command -v nvidia-smi &> /dev/null; then
-  nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits
-fi
-
+# ComfyUI startup
 echo "[ENTRYPOINT] Starting ComfyUI with args: ${ARGS[*]}"
-
-# Copy wrapper script to ComfyUI directory
-cp /comfyui_wrapper.py "$COMFYUI_DIR/comfyui_wrapper.py"
-
-# เพิ่ม timeout สำหรับ ComfyUI startup
-timeout 300 python3 "$COMFYUI_DIR/comfyui_wrapper.py" "${ARGS[@]}" &
+python3 main.py "${ARGS[@]}" 2>&1 | tee /mnt/netdrive/comfyui/main.log &
 COMFYUI_PID=$!
 
-# Monitor startup
-echo "[DEBUG] Monitoring ComfyUI startup..."
-for i in {1..60}; do
-    if curl -s http://localhost:8188 > /dev/null 2>&1; then
-        echo "[DEBUG] ComfyUI started successfully after ${i}s"
+# Wait for ComfyUI to start
+sleep 2
+if ! pgrep -f "python.*main.py" > /dev/null; then
+    echo "[ERROR] Failed to start ComfyUI (main.py not running)"
+    exit 1
+fi
+
+# Health check: Main.py
+echo "[HEALTHCHECK] Waiting for ComfyUI web UI to be ready..."
+MAX_ROUNDS=10
+for ((i=1; i<=MAX_ROUNDS; i++)); do
+    if curl -s http://0.0.0.0:8188 > /dev/null 2>&1; then
+        echo "[HEALTHCHECK] ✅ ComfyUI is up after $((i*30)) seconds."
         break
     fi
-    sleep 1
+    echo "[HEALTHCHECK] ...not ready yet (waited $((i*30)) seconds)"
+    sleep 30
 done
 
-# Wait for all background jobs
-wait
+# Notify if ComfyUI did not start within 10 rounds
+if ! curl -s http://0.0.0.0:8188 > /dev/null 2>&1; then
+    echo "[HEALTHCHECK] ⚠️  ComfyUI did not start within $((MAX_ROUNDS*30)) seconds."
+fi
+
+echo "[ENTRYPOINT] Pod ready"
+sleep infinity

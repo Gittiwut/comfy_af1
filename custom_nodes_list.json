@@ -47,9 +47,6 @@
   "ComfyUI-RED-UNO": [
     "https://github.com/QijiTec/ComfyUI-RED-UNO.git"
   ],
-  "Bjornulf_custom_nodes": [
-    "https://github.com/justUmen/Bjornulf_custom_nodes.git"
-  ],
   "ComfyUI-Custom-Scripts": [
     "https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git"
   ]
