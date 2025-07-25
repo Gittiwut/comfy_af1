@@ -22,8 +22,8 @@
     "https://huggingface.co/Patarapoom/model/resolve/main/nongnoey_flux.safetensors",
     "https://huggingface.co/ali-vilab/ACE_Plus/resolve/main/subject/comfyui_subject_lora16.safetensors",
     "https://huggingface.co/ali-vilab/ACE_Plus/resolve/main/portrait/comfyui_portrait_lora64.safetensors",
-    "https://civitai.com/api/download/models/1455640?type=Model&format=SafeTensor",
-    "https://civitai.com/api/download/models/558984?type=Model&format=SafeTensor"
+    "https://civitai.com/api/download/models/1455640?type=Model&format=SafeTensor&token=bba068877e9153b6489c4e70ef63db0d",
+    "https://civitai.com/api/download/models/558984?type=Model&format=SafeTensor&token=bba068877e9153b6489c4e70ef63db0d"
   ],
   "upscale_models": [
     "https://huggingface.co/lokCX/4x-Ultrasharp/resolve/main/4x-UltraSharp.pth"
