@@ -49,5 +49,8 @@
   ],
   "ComfyUI-Custom-Scripts": [
     "https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git"
+  ],
+  "ComfyUI-PuLID-Flux": [
+    "https://github.com/balazik/ComfyUI-PuLID-Flux.git"
   ]
 }

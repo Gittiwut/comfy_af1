@@ -7,9 +7,12 @@ import tempfile
 import aiohttp
 import aiofiles
 from urllib.parse import urlparse
+import re
 
 # เพิ่ม concurrency limit
 MAX_CONCURRENT_DOWNLOADS = 8
+
+CIVITAI_TOKEN = os.environ.get("CIVITAI_TOKEN")
 
 def get_filename_from_url(url):
     path = urlparse(url).path
@@ -62,11 +65,22 @@ async def download_with_aiohttp(url, dest):
     """Download using aiohttp for better performance"""
     try:
         print(f"[MODEL] (aiohttp) Downloading: {url} -> {dest}")
-        timeout = aiohttp.ClientTimeout(total=300)  # 5 minutes timeout
+        timeout = aiohttp.ClientTimeout(total=300)
         connector = aiohttp.TCPConnector(limit=100, limit_per_host=10)
+        headers = {}
+        # แนบ Authorization header เฉพาะ civitai
+        if "civitai.com" in url and CIVITAI_TOKEN:
+            headers["Authorization"] = f"Bearer {CIVITAI_TOKEN}"
         async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-            async with session.get(url) as response:
+            async with session.get(url, headers=headers) as response:
                 if response.status == 200:
+                    # ดึงชื่อไฟล์จาก Content-Disposition ถ้ามี
+                    cd = response.headers.get("Content-Disposition")
+                    if cd:
+                        match = re.search(r'filename="(.+)"', cd)
+                        if match:
+                            filename = match.group(1)
+                            dest = dest.parent / filename
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     async with aiofiles.open(dest, 'wb') as f:
                         async for chunk in response.content.iter_chunked(16384):
