@@ -3,18 +3,21 @@
     "https://huggingface.co/Patarapoom/model/resolve/main/juggernautXL_juggXIByRundiffusion.safetensors"
   ],
   "vae": [
-    "https://huggingface.co/Patarapoom/model/resolve/main/ae.safetensors"
+    "https://huggingface.co/Patarapoom/model/resolve/main/ae.safetensors",
+    "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors"
   ],
   "unet": [
     "https://huggingface.co/Kijai/flux-fp8/resolve/main/flux1-dev-fp8.safetensors",
-    "https://huggingface.co/Patarapoom/model/resolve/main/flux1FillDevFp8_v10.safetensors"
+    "https://huggingface.co/Patarapoom/model/resolve/main/flux1FillDevFp8_v10.safetensors",
+    "https://huggingface.co/city96/Wan2.1-T2V-14B-gguf/resolve/main/wan2.1-t2v-14b-Q4_0.gguf"
   ],
   "diffusion_models": [
     "https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors"
   ],
   "text_encoders": [
     "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
-    "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors"
+    "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors",
+    "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors"
   ],
   "loras": [
     "https://huggingface.co/bytedance-research/UNO/resolve/main/dit_lora.safetensors",
@@ -24,7 +27,9 @@
     "https://huggingface.co/ali-vilab/ACE_Plus/resolve/main/portrait/comfyui_portrait_lora64.safetensors",
     "https://civitai.com/api/download/models/558984?type=Model&format=SafeTensor",
     "https://civitai.com/api/download/models/1455640?type=Model&format=SafeTensor",
-    "https://civitai.com/api/download/models/21039?type=Model&format=SafeTensor&size=full&fp=fp16"
+    "https://civitai.com/api/download/models/21039?type=Model&format=SafeTensor&size=full&fp=fp16",
+    "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank32.safetensors",
+    "https://civitai.com/api/download/models/1840406?type=Model&format=SafeTensor"
   ],
   "upscale_models": [
     "https://huggingface.co/lokCX/4x-Ultrasharp/resolve/main/4x-UltraSharp.pth"
