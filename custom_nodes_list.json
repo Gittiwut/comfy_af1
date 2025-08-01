@@ -44,6 +44,9 @@
   "comfyui-inpaint-nodes": [
     "https://github.com/Acly/comfyui-inpaint-nodes.git"
   ],
+  "ComfyUI-ControlNet-aux": [
+    "https://github.com/Mikubill/sd-webui-controlnet-aux.git"
+  ],
   "cg-use-everywhere": [
     "https://github.com/chrisgoringe/cg-use-everywhere.git"
   ],
