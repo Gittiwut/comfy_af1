@@ -2,35 +2,20 @@
   "ComfyUI-Manager": [
     "https://github.com/ltdrdata/ComfyUI-Manager.git"
   ],
-  "ComfyUI-Impact-Pack": [
-    "https://github.com/ltdrdata/ComfyUI-Impact-Pack.git"
-  ],
-  "ComfyUI_essentials": [
-    "https://github.com/cubiq/ComfyUI_essentials.git"
-  ],
-  "ComfyUI-Inspire-Pack": [
-    "https://github.com/ltdrdata/ComfyUI-Inspire-Pack.git"
+  "ComfyUI_IPAdapter_plus": [
+    "https://github.com/cubiq/ComfyUI_IPAdapter_plus.git"
   ],
   "comfyui_controlnet_aux": [
     "https://github.com/Fannovel16/comfyui_controlnet_aux.git"
   ],
-  "DZ-FaceDetailer": [
-    "https://github.com/nicofdga/DZ-FaceDetailer.git"
+  "ComfyUI-Impact-Pack": [
+    "https://github.com/ltdrdata/ComfyUI-Impact-Pack.git"
   ],
-  "ComfyUI_IPAdapter_plus": [
-    "https://github.com/cubiq/ComfyUI_IPAdapter_plus.git"
+  "ComfyUI-Custom-Scripts": [
+    "https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git"
   ],
-  "ComfyUI_UltimateSDUpscale": [
-    "https://github.com/ssitu/ComfyUI_UltimateSDUpscale.git"
-  ],
-  "ComfyUI-VideoHelperSuite": [
-    "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git"
-  ],
-  "comfyui-inpaint-nodes": [
-    "https://github.com/Acly/comfyui-inpaint-nodes.git"
-  ],
-  "ComfyUI-KJNodes": [
-    "https://github.com/kijai/ComfyUI-KJNodes.git"
+  "ComfyUI-AdvancedLivePortrait": [
+    "https://github.com/PowerHouseMan/ComfyUI-AdvancedLivePortrait.git"
   ],
   "ComfyUI-GGUF": [
     "https://github.com/city96/ComfyUI-GGUF.git"
@@ -38,19 +23,67 @@
   "rgthree-comfy": [
     "https://github.com/rgthree/rgthree-comfy.git"
   ],
-  "ComfyUI_Custom_Nodes_AlekPet": [
-    "https://github.com/AlekPet/ComfyUI_Custom_Nodes_AlekPet.git"
+  "ComfyUI-Easy-Use": [
+    "https://github.com/yolain/ComfyUI-Easy-Use.git"
   ],
-  "ComfyUI-Gemini-API": [
-    "https://github.com/CY-CHENYUE/ComfyUI-Gemini-API.git"
+  "ComfyUI-KJNodes": [
+    "https://github.com/kijai/ComfyUI-KJNodes.git"
   ],
-  "ComfyUI-RED-UNO": [
-    "https://github.com/QijiTec/ComfyUI-RED-UNO.git"
+  "ComfyUI-Florence2": [
+    "https://github.com/kijai/ComfyUI-Florence2.git"
   ],
-  "ComfyUI-Custom-Scripts": [
-    "https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git"
+  "ComfyUI_UltimateSDUpscale": [
+    "https://github.com/ssitu/ComfyUI_UltimateSDUpscale.git"
   ],
-  "ComfyUI-PuLID-Flux": [
-    "https://github.com/balazik/ComfyUI-PuLID-Flux.git"
+  "ComfyUI-VideoHelperSuite": [
+    "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git"
+  ],
+  "ComfyUI-IC-Light": [
+    "https://github.com/kijai/ComfyUI-IC-Light.git"
+  ],
+  "comfyui-inpaint-nodes": [
+    "https://github.com/Acly/comfyui-inpaint-nodes.git"
+  ],
+  "cg-use-everywhere": [
+    "https://github.com/chrisgoringe/cg-use-everywhere.git"
+  ],
+  "ComfyUI-Inspire-Pack": [
+    "https://github.com/ltdrdata/ComfyUI-Inspire-Pack.git"
+  ],
+  "comfy_mtb": [
+    "https://github.com/melMass/comfy_mtb.git"
+  ],
+  "ComfyUI-MVAdapter": [
+    "https://github.com/melMass/ComfyUI-MVAdapter.git"
+  ],
+  "comfy-image-saver": [
+    "https://github.com/giriss/comfy-image-saver.git"
+  ],
+  "ComfyUI-Image-Filters" : [
+    "https://github.com/spacepxl/ComfyUI-Image-Filters.git"
+  ],
+  "ComfyUI-Impact-Subpack": [
+    "https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git"
+  ],
+  "ComfyUI_BiRefNet_ll": [
+    "https://github.com/lldacing/ComfyUI_BiRefNet_ll.git"
+  ],
+  "ComfyUI-PuLID-Flux-Enhanced": [
+    "https://github.com/sipie800/ComfyUI-PuLID-Flux-Enhanced.git"
+  ],
+  "DZ-FaceDetailer": [
+    "https://github.com/nicofdga/DZ-FaceDetailer.git"
+  ],
+  "ComfyUI-AutoCropFaces": [
+    "https://github.com/liusida/ComfyUI-AutoCropFaces.git"
+  ],
+  "was-node-suite-comfyui": [
+    "https://github.com/ltdrdata/was-node-suite-comfyui.git"
+  ],
+  "Civicomfy": [
+    "https://github.com/MoonGoblinDev/Civicomfy.git"
+  ],
+  "ComfyUI-Advanced-ControlNet" : [
+    "https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet.git"
   ]
 }
