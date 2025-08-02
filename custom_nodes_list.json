@@ -14,9 +14,6 @@
   "ComfyUI-Custom-Scripts": [
     "https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git"
   ],
-  "ComfyUI-AdvancedLivePortrait": [
-    "https://github.com/PowerHouseMan/ComfyUI-AdvancedLivePortrait.git"
-  ],
   "ComfyUI-GGUF": [
     "https://github.com/city96/ComfyUI-GGUF.git"
   ],
@@ -35,17 +32,14 @@
   "ComfyUI_UltimateSDUpscale": [
     "https://github.com/ssitu/ComfyUI_UltimateSDUpscale.git"
   ],
-  "ComfyUI-VideoHelperSuite": [
-    "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git"
-  ],
   "ComfyUI-IC-Light": [
     "https://github.com/kijai/ComfyUI-IC-Light.git"
   ],
   "comfyui-inpaint-nodes": [
     "https://github.com/Acly/comfyui-inpaint-nodes.git"
   ],
-  "ComfyUI-ControlNet-aux": [
-    "https://github.com/Mikubill/sd-webui-controlnet-aux.git"
+  "ComfyUI-Advanced-ControlNet": [
+    "https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet.git"
   ],
   "cg-use-everywhere": [
     "https://github.com/chrisgoringe/cg-use-everywhere.git"
@@ -68,9 +62,6 @@
   "ComfyUI-Impact-Subpack": [
     "https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git"
   ],
-  "ComfyUI_BiRefNet_ll": [
-    "https://github.com/lldacing/ComfyUI_BiRefNet_ll.git"
-  ],
   "ComfyUI-PuLID-Flux-Enhanced": [
     "https://github.com/sipie800/ComfyUI-PuLID-Flux-Enhanced.git"
   ],
@@ -86,7 +77,13 @@
   "Civicomfy": [
     "https://github.com/MoonGoblinDev/Civicomfy.git"
   ],
-  "ComfyUI-Advanced-ControlNet" : [
-    "https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet.git"
+  "ComfyUI-AdvancedLivePortrait": [
+    "https://github.com/PowerHouseMan/ComfyUI-AdvancedLivePortrait.git"
+  ],
+  "ComfyUI-VideoHelperSuite": [
+    "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git"
+  ],
+  "ComfyUI_BiRefNet_ll": [
+    "https://github.com/lldacing/ComfyUI_BiRefNet_ll.git"
   ]
 }
