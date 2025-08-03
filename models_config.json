@@ -1,7 +1,8 @@
 {
   "checkpoints": [
     "https://huggingface.co/Patarapoom/model/resolve/main/juggernautXL_juggXIByRundiffusion.safetensors",
-    "https://civitai.com/api/download/models/90072?type=Model&format=SafeTensor&size=pruned&fp=fp16"
+    "https://civitai.com/api/download/models/90072?type=Model&format=SafeTensor&size=pruned&fp=fp16",
+    "https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev-fp8.safetensors"
   ],
   "vae": [
     "https://huggingface.co/Patarapoom/model/resolve/main/ae.safetensors",
