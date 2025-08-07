@@ -88,7 +88,7 @@ fi
 # Install xformers
 echo "[INSTALL] Installing xformers from source..."
 export TORCH_CUDA_ARCH_LIST="12.0"
-${VENV_PATH}/bin/python -m pip install -v --no-binary :all: --pre xformers
+${VENV_PATH}/bin/python -m pip install -v --no-binary :all: --pre xformers --index-url https://download.pytorch.org/whl/nightly/cu128
 echo "[INSTALL] ✅ xformers installation complete."
 
 # Verification after install (always run)
