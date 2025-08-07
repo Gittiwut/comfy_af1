@@ -67,6 +67,41 @@ else
     echo "[WARNING] requirements.txt not found at /requirements.txt"
 fi
 
+# Install correct torch version for sm_120
+TARGET_TORCH_ID="+cu128"
+echo "[INSTALL] Checking for correct torch version..."
+if ! python -c "
+import torch
+v = torch.__version__
+print(f'Found torch version {v}')
+assert 'dev' in v and '${TARGET_TORCH_ID}' in v, f'Version {v} is not the target dev build.'
+" >/dev/null 2>&1; then
+  echo "[INSTALL] ❌ Correct torch not found. Installing nightly version for CUDA 12.8..."
+  uv pip install --force-reinstall --no-cache-dir --pre \
+    torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/nightly/cu128
+  echo "[INSTALL] ✅ Installation complete."
+else
+  echo "[INFO] ✅ Correct torch version already installed. Skipping reinstall."
+fi
+
+# Install xformers
+echo "[INSTALL] Installing xformers..."
+uv pip install --pre xformers
+echo "[INSTALL] ✅ xformers installation complete."
+
+# Verification after install (always run)
+echo "[VERIFY] 🔍 Final torch version in use:"
+python -c "
+import torch
+import xformers
+print(f'✔ Torch: {torch.__version__}')
+print(f'✔ xformers: {xformers.__version__}')
+print(f'✔ CUDA available: {torch.cuda.is_available()}')
+if torch.cuda.is_available():
+    print(f'✔ Device: {torch.cuda.get_device_name(0)}')
+"
+
 # ติดตั้ง config jupyter
 if [ ! -f "${VENV_PATH}/bin/jupyter" ]; then
     echo "[SETUP] Installing Jupyter..."
