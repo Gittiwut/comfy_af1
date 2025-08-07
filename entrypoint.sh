@@ -70,14 +70,14 @@ fi
 # Install correct torch version for sm_120
 TARGET_TORCH_ID="+cu128"
 echo "[INSTALL] Checking for correct torch version..."
-if ! python -c "
+if ! ${VENV_PATH}/bin/python -c "
 import torch
 v = torch.__version__
 print(f'Found torch version {v}')
 assert 'dev' in v and '${TARGET_TORCH_ID}' in v, f'Version {v} is not the target dev build.'
 " >/dev/null 2>&1; then
   echo "[INSTALL] ❌ Correct torch not found. Installing nightly version for CUDA 12.8..."
-  uv pip install --force-reinstall --no-cache-dir --pre \
+  ${VENV_PATH}/bin/python -m uv pip install --force-reinstall --no-cache-dir --pre \
     torch torchvision torchaudio \
     --index-url https://download.pytorch.org/whl/nightly/cu128
   echo "[INSTALL] ✅ Installation complete."
@@ -86,13 +86,14 @@ else
 fi
 
 # Install xformers
-echo "[INSTALL] Installing xformers..."
-uv pip install --pre xformers
+echo "[INSTALL] Installing xformers from source..."
+export TORCH_CUDA_ARCH_LIST="12.0"
+${VENV_PATH}/bin/python -m pip install -v --no-binary :all: --pre xformers
 echo "[INSTALL] ✅ xformers installation complete."
 
 # Verification after install (always run)
 echo "[VERIFY] 🔍 Final torch version in use:"
-python -c "
+${VENV_PATH}/bin/python -c "
 import torch
 import xformers
 print(f'✔ Torch: {torch.__version__}')
@@ -231,10 +232,10 @@ free -h
 
 # Add log file for custom nodes and models setup
 echo "[SETUP] Starting custom nodes setup..."
-python3 /setup_custom_nodes.py > /mnt/netdrive/comfyui/setup_custom_nodes.log 2>&1 &
+${VENV_PATH}/bin/python /setup_custom_nodes.py > /mnt/netdrive/comfyui/setup_custom_nodes.log 2>&1 &
 CUSTOM_NODES_PID=$!
 echo "[SETUP] Starting models download..."
-python3 /download_models.py > /mnt/netdrive/comfyui/download_models.log 2>&1 &
+${VENV_PATH}/bin/python /download_models.py > /mnt/netdrive/comfyui/download_models.log 2>&1 &
 DOWNLOAD_MODELS_PID=$!
 
 # เพิ่ม enhanced monitoring
@@ -322,7 +323,7 @@ if [ $# -gt 0 ]; then
 fi
 
 # Add CPU-only flag if no GPU
-if ! command -v nvidia-smi &> /dev/null || ! python3 -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
+if ! command -v nvidia-smi &> /dev/null || ! ${VENV_PATH}/bin/python -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
   echo "[ENTRYPOINT] Adding --cpu flag (no GPU available)"
   ARGS+=(--cpu)
 fi
@@ -335,7 +336,7 @@ fi
 
 # ComfyUI startup
 echo "[ENTRYPOINT] Starting ComfyUI with args: ${ARGS[*]}"
-python3 main.py "${ARGS[@]}" 2>&1 | tee /mnt/netdrive/comfyui/main.log &
+${VENV_PATH}/bin/python main.py "${ARGS[@]}" 2>&1 | tee /mnt/netdrive/comfyui/main.log &
 COMFYUI_PID=$!
 
 # Wait for ComfyUI to start
