@@ -16,10 +16,10 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export CUDA_MODULE_LOADING=LAZY
 
 # Check GPU architecture and set flags
-GPU_ARCH=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n1 | tr -d '.')
-if [[ "$GPU_ARCH" -ge "90" ]]; then
+GPU_ARCH=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | tr -d '.' || echo "0")
+if [[ "$GPU_ARCH" =~ ^[0-9]+$ ]] && [[ "$GPU_ARCH" -ge "90" ]]; then
   echo "[INFO] Hopper/Ada GPU detected, setting compatibility flags"
-  export XFORMERS_DISABLE_FLASH_ATTN=1
+  export XFORMERS_DISABLE_FLASH_CPU=1
 fi
 
 # --- Normalize ENV values ---
@@ -122,32 +122,32 @@ case "$CU_TAG" in
     # For CUDA 12.8 (RTX 5090)
     TORCH_URL="https://download.pytorch.org/whl/cu128"
     TORCH_SUFFIX="cu128"
-    TORCHVISION_VER="0.23.0"
+    TVISION_VER="0.23.0"
     ;;
   cu124)
     # For CUDA 12.4 (RTX 4090)
     TORCH_URL="https://download.pytorch.org/whl/cu124" 
     TORCH_SUFFIX="cu124"
-    TORCHVISION_VER="0.23.1"
+    TVISION_VER="0.23.1"
     ;;
   cu121)
     TORCH_URL="https://download.pytorch.org/whl/cu121"
     TORCH_SUFFIX="cu121"
-    TORCHVISION_VER="0.23.1"
+    TVISION_VER="0.23.1"
     ;;
   cu118)
     TORCH_URL="https://download.pytorch.org/whl/cu118"
     TORCH_SUFFIX="cu118"
-    TORCHVISION_VER="0.23.1"
+    TVISION_VER="0.23.1"
     ;;
   cpu)
     TORCH_URL="https://download.pytorch.org/whl/cpu"
     TORCH_SUFFIX="cpu"
-    TORCHVISION_VER="0.23.1"
+    TVISION_VER="0.23.1"
     ;;
 esac
 
-echo "[TORCH] Target: torch==${TORCH_VER}+${TORCH_SUFFIX}, torchvision==${TORCHVISION_VER}+${TORCH_SUFFIX}"
+echo "[TORCH] Target: torch==${TORCH_VER}+${TORCH_SUFFIX}, torchvision==${TVISION_VER}+${TORCH_SUFFIX}"
 
 # Check current torch version
 CURRENT_TORCH=$("$PYBIN" -c "import torch; print(torch.__version__)" 2>/dev/null || echo "none")
@@ -183,19 +183,23 @@ if [ "$CU_TAG" != "cpu" ]; then
     echo "[XFORMERS] Installing with torch ${TORCH_VER}+${CU_TAG} locked"
     
     # Method 1: Try installing with --no-deps first
-    if ! "$PIPBIN" install --no-cache-dir --no-deps \
-      --extra-index-url "$TORCH_URL" xformers 2>/dev/null; then
-      
-      echo "[XFORMERS] Trying alternative installation method"
-      
-      # Method 2: Install with constraint file
-      echo "torch==${TORCH_VER}+${CU_TAG}" > /tmp/constraints.txt
-      "$PIPBIN" install --no-cache-dir \
-        --constraint /tmp/constraints.txt \
-        --extra-index-url "$TORCH_URL" xformers
-      rm -f /tmp/constraints.txt
-    fi
+  if ! "$PIPBIN" install --no-cache-dir --no-deps \
+    --extra-index-url "$TORCH_URL" xformers 2>/dev/null; then
+  
+    echo "[XFORMERS] Method 1 failed, trying alternative installation method"
+  
+    # Method 2: Install with constraint file
+    echo "torch==${TORCH_VER}+${CU_TAG}" > /tmp/constraints.txt
+    if ! "$PIPBIN" install --no-cache-dir \
+      --constraint /tmp/constraints.txt \
+      --extra-index-url "$TORCH_URL" xformers; then
+    
+    echo "[WARNING] xFormers installation failed, continuing without it"
+    rm -f /tmp/constraints.txt
+  else
+    rm -f /tmp/constraints.txt
   fi
+fi
   
   # Verify torch wasn't downgraded
   TORCH_AFTER=$("$PYBIN" -c "import torch; print(torch.__version__)" 2>/dev/null)
@@ -254,9 +258,6 @@ EOF
   
   rm -f /tmp/req-notorch.txt /tmp/constraints.txt
 fi
-
-echo "[DEPS] Fixing dependency conflicts..."
-"$PYBIN" /fix_dependencies.py || true
 
 # ตรวจสอบว่ามีโฟลเดอร์ ComfyUI หรือไม่ ถ้าไม่มีก็ clone
 if [ ! -d "$COMFYUI_DIR" ] || [ -z "$(ls -A "$COMFYUI_DIR" 2>/dev/null)" ]; then
@@ -367,11 +368,6 @@ pkill -f "uv pip install" 2>/dev/null || true
 echo "[CLEANUP] Cleaning up temporary files..."
 find /tmp -name "*.tmp" -delete 2>/dev/null || true
 find /mnt/netdrive/tmp -name "*.tmp" -delete 2>/dev/null || true
-
-# Memory cleanup
-echo "[CLEANUP] Memory cleanup..."
-sync
-echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
 
 echo "[DEBUG] Disk usage after parallel setup:"
 df -h /
