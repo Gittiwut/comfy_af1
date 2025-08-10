@@ -38,6 +38,9 @@
   "comfyui-inpaint-nodes": [
     "https://github.com/Acly/comfyui-inpaint-nodes.git"
   ],
+  "ComfyUI_essentials": [
+    "https://github.com/cubiq/ComfyUI_essentials.git"
+  ],
   "ComfyUI-Advanced-ControlNet": [
     "https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet.git"
   ],

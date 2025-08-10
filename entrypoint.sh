@@ -1,126 +1,165 @@
-#!/bin/bash
-set -eo pipefail
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo "[ENTRYPOINT] Starting container..."
+# --- Config ---
+: "${COMFYUI_ROOT:=/mnt/netdrive/comfyui}"
+: "${VENV_ROOT:=/mnt/netdrive/python_envs}"
+: "${PIP_CACHE_DIR:=/mnt/netdrive/pip_cache}"
+: "${TMPDIR:=/mnt/netdrive/tmp}"
+: "${LEGACY_VENV:=/mnt/netdrive/python_env}"
+: "${JUPYTER_CONFIG_DIR:=/mnt/netdrive/config/jupyter}"
 
-# กำหนด path
-export COMFYUI_DIR="/mnt/netdrive/comfyui"
+# --- Normalize ENV values ---
+# Normalize ENABLE_JUPYTER (accept true/1/yes/enable as true)
+: "${ENABLE_JUPYTER:=false}"
+case "${ENABLE_JUPYTER,,}" in
+  true|1|yes|enable) ENABLE_JUPYTER=true ;;
+  *)                 ENABLE_JUPYTER=false ;;
+esac
+
+# --- Network caches (opt-in บางตัว) ---
+DRV="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n1 || echo unknown)"
+CACHE_ROOT="/mnt/netdrive/cache/${CU_TAG}_${DRV}"
+
+# --- Derived paths ---
+export COMFYUI_DIR="$COMFYUI_ROOT"
 export COMFYUI_CUSTOM_NODES="$COMFYUI_DIR/custom_nodes"
 export COMFYUI_MODELS="$COMFYUI_DIR/models"
-COMFYUI_DIR="${COMFYUI_ROOT:-/mnt/netdrive/comfyui}"
-VENV_PATH="/mnt/netdrive/python_env"
-JUPYTER_CONFIG_DIR="/mnt/netdrive/config/jupyter"
 
-# ตรวจสอบว่า uv มีอยู่หรือไม่
-if ! command -v uv &> /dev/null; then
-    echo "[ERROR] UV not found! Please check Dockerfile installation."
-    exit 1
-fi
-echo "[INFO] UV found: $(which uv)"
+# --- Create required dirs ---
+mkdir -p "$PIP_CACHE_DIR" "$TMPDIR" "$VENV_ROOT" "$COMFYUI_ROOT"
 
-# สร้าง Virtual Environment
-if [ ! -f "${VENV_PATH}/bin/python" ]; then
-    echo "[SETUP] Creating Python virtual environment..."
-    python3 -m venv ${VENV_PATH}
-    ${VENV_PATH}/bin/python -m pip install --upgrade pip
-fi
+unset PIP_INDEX_URL || true
+unset PIP_EXTRA_INDEX_URL || true
+export PIP_DISABLE_PIP_VERSION_CHECK=1
+export PIP_CONFIG_FILE=/dev/null
 
-# Activate virtual environment
-export PATH="${VENV_PATH}/bin:${PATH}"
+echo "[BOOT] Host driver: $(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n1 || echo 'unknown')"
 
-# ตั้งค่า TMPDIR ก่อนรัน Debug
-mkdir -p /mnt/netdrive/tmp
-export TMPDIR=/mnt/netdrive/tmp
-
-# Debug TMPDIR Directory
-echo "[DEBUG] TMPDIR Directory:"
-ls -ld /mnt/netdrive/tmp
-echo "[DEBUG] TMPDIR Write Test:"
-touch /mnt/netdrive/tmp/testfile && echo "Write OK" || echo "Write FAIL"
-echo "[DEBUG] TMPDIR Remove Test:"
-rm -f /mnt/netdrive/tmp/testfile
-
-# Debug disk usage after TMPDIR setup
-echo "[DEBUG] Disk usage after TMPDIR setup:"
-df -h /
-df -h /mnt/netdrive
-
-if [ ! -d "/mnt/netdrive/tmp" ]; then
-    echo "[ERROR] /mnt/netdrive/tmp does not exist or cannot be created!"
-    exit 1
-fi
-export TMPDIR=/mnt/netdrive/tmp
-echo "[DEBUG] TMPDIR set to: $TMPDIR"
-
-# ติดตั้ง aiohttp และ aiofiles
-echo "[SETUP] Installing parallel processing dependencies..."
-uv pip install --python=${VENV_PATH}/bin/python --no-cache aiohttp aiofiles
-
-# ติดตั้ง dependencies จาก requirements.txt แบบ parallel
-if [ -f "/requirements.txt" ]; then
-    echo "[SETUP] Installing dependencies from requirements.txt..."
-    uv pip install --python=${VENV_PATH}/bin/python --no-cache -r /requirements.txt
-    echo "[DEBUG] Disk usage after requirements install:"
-    df -h /
-    df -h /mnt/netdrive
+# --- Detect CUDA -> CU_TAG ---
+GPU_CC_RAW="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n1 || true)"
+GPU_CC_MAJ="${GPU_CC_RAW%%.*}"
+if [[ -n "$GPU_CC_RAW" ]]; then
+  if (( GPU_CC_MAJ >= 12 )); then CU_TAG="cu128"
+  elif (( GPU_CC_MAJ >= 9 )); then CU_TAG="cu126"
+  else CU_TAG="cu124"
+  fi
 else
-    echo "[WARNING] requirements.txt not found at /requirements.txt"
+  CU_TAG="cpu"
+fi
+echo "[INFO] GPU Compute Capability: ${GPU_CC_RAW:-unknown} → CU_TAG=$CU_TAG"
+
+# --- Per-CUDA venv + symlink (/mnt/netdrive/python_env -> current venv) ---
+VENV_PATH="${VENV_ROOT}/${CU_TAG}"
+if [ ! -d "$VENV_PATH" ]; then
+  echo "[VENV] Creating venv at $VENV_PATH"
+  python3 -m venv "$VENV_PATH"
+fi
+# refresh legacy symlink
+if [ ! -L "$LEGACY_VENV" ] || [ "$(readlink -f "$LEGACY_VENV")" != "$VENV_PATH" ]; then
+  rm -rf "$LEGACY_VENV" 2>/dev/null || true
+  ln -s "$VENV_PATH" "$LEGACY_VENV"
 fi
 
-# ติดตั้ง config jupyter
-if [ ! -f "${VENV_PATH}/bin/jupyter" ]; then
-    echo "[SETUP] Installing Jupyter..."
-    uv pip install --python=${VENV_PATH}/bin/python --no-cache jupyter jupyterlab
-    echo "[DEBUG] Disk usage after Jupyter install:"
-    df -h /
-    df -h /mnt/netdrive
-fi
+# Activate venv
+source "$VENV_PATH/bin/activate"
+PYBIN="$VENV_PATH/bin/python"
+PIPBIN="$VENV_PATH/bin/pip"
+export PATH="$VENV_PATH/bin:$PATH"
 
-# Create Jupyter config
-export JUPYTER_CONFIG_DIR=${JUPYTER_CONFIG_DIR}
-if [ ! -f "${JUPYTER_CONFIG_DIR}/jupyter_notebook_config.py" ]; then
-    echo "[SETUP] Configuring Jupyter..."
-    mkdir -p ${JUPYTER_CONFIG_DIR}
-    ${VENV_PATH}/bin/jupyter notebook --generate-config
-    
-    # Add Jupyter configuration
-    cat >> ${JUPYTER_CONFIG_DIR}/jupyter_notebook_config.py << EOF
-c.NotebookApp.allow_root = True
-c.NotebookApp.ip = '0.0.0.0'
-c.NotebookApp.token = ''
-c.NotebookApp.password = ''
-c.NotebookApp.allow_origin = '*'
-c.NotebookApp.allow_remote_access = True
-EOF
-fi  
+$PIPBIN install --upgrade pip wheel setuptools
+echo "[INFO] Using Python: $($PYBIN --version)"
 
-# start jupyter notebook
-if [ "$ENABLE_JUPYTER" = "true" ]; then
-    echo "[STARTUP] Starting Jupyter Lab on port 8888..."
-    
-    # Kill any existing Jupyter processes
-    pkill -f jupyter 2>/dev/null || true
-    
-    # Start Jupyter in background
-    ${VENV_PATH}/bin/jupyter lab --port=8888 --no-browser --allow-root \
-        --ServerApp.token='' --ServerApp.password='' \
-        --ServerApp.allow_origin='*' \
-        --ServerApp.root_dir=/mnt/netdrive \
-        --ServerApp.allow_remote_access=True \
-        --ServerApp.open_browser=False \
-        --ServerApp.port_retries=0 &
-    
-    # Wait a bit and check if Jupyter started successfully
-    sleep 5
-    if pgrep -f jupyter > /dev/null; then
-        echo "[STARTUP] ✅ Jupyter Lab started successfully on port 8888"
+# ---- desired versions ----
+TORCH_VER="2.8.0"
+case "$CU_TAG" in
+  cu128) TORCH_URL="https://download.pytorch.org/whl/cu128" ;;
+  cu126) TORCH_URL="https://download.pytorch.org/whl/cu126" ;;
+  cu124) TORCH_URL="https://download.pytorch.org/whl/cu124" ;;
+  cpu)   TORCH_URL="https://download.pytorch.org/whl/cpu" ;;
+esac
+
+
+# pick torchvision to match torch 2.8
+case "$TORCH_VER" in
+  2.8.*)
+    if [ "$CU_TAG" = "cu128" ]; then
+      TVISION_VER="0.23.0"
     else
-        echo "[STARTUP] ❌ Jupyter Lab failed to start"
-        echo "[STARTUP] Checking Jupyter logs..."
-        ${VENV_PATH}/bin/jupyter lab --no-browser --allow-root \
-            --ServerApp.token='' --ServerApp.password='' \
-            --ServerApp.allow_origin='*' 2>&1 | head -20
+      TVISION_VER="0.23.1"
     fi
+    ;;
+  2.7.*) TVISION_VER="0.19.1" ;;
+  *)     TVISION_VER="0.23.1" ;;
+esac
+
+# install if missing
+if ! "$PYBIN" - <<'PY'
+import sys
+try:
+    import torch; print("found torch", torch.__version__); sys.exit(0)
+except Exception:
+    sys.exit(1)
+PY
+then
+  echo "[TORCH] Installing torch==${TORCH_VER}+${CU_TAG}, torchvision==${TVISION_VER}+${CU_TAG}"
+  "$PIPBIN" install --only-binary=:all: --extra-index-url "$TORCH_URL" \
+    "torch==${TORCH_VER}+${CU_TAG}" "torchvision==${TVISION_VER}+${CU_TAG}"
+fi
+
+# verify GPU runtime
+if [ "$CU_TAG" != "cpu" ]; then
+  "$PYBIN" - <<'PY'
+import sys, torch
+assert torch.cuda.is_available(), "CUDA not available"
+x=torch.randn(512,512,device="cuda").half(); y=torch.randn(512,512,device="cuda").half()
+torch.matmul(x,y); torch.cuda.synchronize()
+print("[TORCH] OK:", torch.__version__, "CUDA", torch.version.cuda)
+PY
+else
+  echo "[TORCH] CPU-only mode detected; skipping CUDA check."
+fi
+
+# --- xFormers: REQUIRED, wheel-only (no source build), fail fast if not usable ---
+if [ "$CU_TAG" != "cpu" ]; then
+  if ! "$PYBIN" - <<'PY'
+import sys
+try:
+    import torch, xformers, xformers.ops as xo
+    q=torch.randn(1,4,64,64,device="cuda",dtype=torch.float16)
+    k=torch.randn(1,4,64,64,device="cuda",dtype=torch.float16)
+    v=torch.randn(1,4,64,64,device="cuda",dtype=torch.float16)
+    xo.memory_efficient_attention(q,k,v); torch.cuda.synchronize()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+PY
+  then
+    echo "[XFORMERS] Installing wheel for ${CU_TAG}"
+    "$PIPBIN" install --only-binary=:all: --extra-index-url "$TORCH_URL" xformers
+    echo "[XFORMERS] Verifying..."
+    "$PYBIN" - <<'PY'
+import sys, torch, xformers, xformers.ops as xo
+assert torch.cuda.is_available(), "CUDA not available"
+q=torch.randn(1,4,64,64,device="cuda",dtype=torch.float16)
+k=torch.randn(1,4,64,64,device="cuda",dtype=torch.float16)
+v=torch.randn(1,4,64,64,device="cuda",dtype=torch.float16)
+xo.memory_efficient_attention(q,k,v); torch.cuda.synchronize()
+print("[XFORMERS] OK")
+PY
+  fi
+else
+  echo "[XFORMERS] Skipped (CPU-only mode)."
+fi
+
+# --- app deps (skip torch/xformers) ---
+REQ="${COMFYUI_DIR}/requirements.txt"
+if [ -f "$REQ" ]; then
+  echo "[PIP] Installing app deps (preserve torch/xformers)"
+  grep -viE '^(torch|torchvision|torchaudio|xformers)(==|>=|<=|$)' "$REQ" > /tmp/req-notorch.txt || true
+  if [ -s /tmp/req-notorch.txt ]; then
+    "$PIPBIN" install -r /tmp/req-notorch.txt
+  fi
 fi
 
 # ตรวจสอบว่ามีโฟลเดอร์ ComfyUI หรือไม่ ถ้าไม่มีก็ clone
@@ -129,33 +168,16 @@ if [ ! -d "$COMFYUI_DIR" ] || [ -z "$(ls -A "$COMFYUI_DIR" 2>/dev/null)" ]; then
     git clone --depth=1 https://github.com/comfyanonymous/ComfyUI.git "$COMFYUI_DIR"
 fi
 
-# ติดตั้ง ComfyUI requirements (ถ้ามี)
-if [ -f "$COMFYUI_DIR/requirements.txt" ]; then
-    echo "[SETUP] Installing ComfyUI requirements..."
-    echo "[DEBUG] Starting ComfyUI requirements installation at $(date)"
-    echo "[DEBUG] Requirements file size: $(wc -l < "$COMFYUI_DIR/requirements.txt") lines"
-    
-    # เพิ่ม Network Check
-    echo "[DEBUG] Network connectivity check..."
-    if curl -s --connect-timeout 5 --max-time 10 https://pypi.org/simple/ > /dev/null; then
-        echo "[DEBUG] Network connectivity: OK (PyPI accessible)"
-    elif curl -s --connect-timeout 5 --max-time 10 https://github.com > /dev/null; then
-        echo "[DEBUG] Network connectivity: OK (GitHub accessible)"
-    else
-        echo "[DEBUG] Network connectivity: SLOW/FAILED"
-    fi
-
-    # เพิ่ม progress indicator
-    uv pip install --python=${VENV_PATH}/bin/python --no-cache -r "$COMFYUI_DIR/requirements.txt" 2>&1 | while IFS= read -r line; do
-        echo "[REQ_PROGRESS] $line"
-    done
-    
-    echo "[DEBUG] ComfyUI requirements installation completed at $(date)"
-    echo "[DEBUG] Disk usage after ComfyUI requirements install:"
-    df -h /
-    df -h /mnt/netdrive
-else
-    echo "[INFO] ComfyUI requirements.txt not found"
+# --- Jupyter (optional; same venv) ---
+if [ "$ENABLE_JUPYTER" = "true" ]; then
+  echo "[JUPYTER] Enabling JupyterLab on :8888"
+  "$PIPBIN" install --no-cache-dir jupyter jupyterlab
+  mkdir -p "$JUPYTER_CONFIG_DIR"
+  nohup "$PYBIN" -m jupyter lab --ip=0.0.0.0 --port=8888 --no-browser \
+    --ServerApp.token='' --ServerApp.password='' \
+    --ServerApp.allow_origin='*' --ServerApp.allow_remote_access=True \
+    --ServerApp.port_retries=0 --ServerApp.root_dir=/mnt/netdrive \
+    > /mnt/netdrive/jupyter.log 2>&1 &
 fi
 
 # System Information
@@ -196,10 +218,10 @@ free -h
 
 # Add log file for custom nodes and models setup
 echo "[SETUP] Starting custom nodes setup..."
-python3 /setup_custom_nodes.py > /mnt/netdrive/comfyui/setup_custom_nodes.log 2>&1 &
+"$PYBIN" /setup_custom_nodes.py > /mnt/netdrive/comfyui/setup_custom_nodes.log 2>&1 &
 CUSTOM_NODES_PID=$!
 echo "[SETUP] Starting models download..."
-python3 /download_models.py > /mnt/netdrive/comfyui/download_models.log 2>&1 &
+"$PYBIN" /download_models.py > /mnt/netdrive/comfyui/download_models.log 2>&1 &
 DOWNLOAD_MODELS_PID=$!
 
 # เพิ่ม enhanced monitoring
@@ -286,22 +308,21 @@ if [ $# -gt 0 ]; then
   ARGS+=("$@")
 fi
 
-# Add CPU-only flag if no GPU
-if ! command -v nvidia-smi &> /dev/null || ! python3 -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
-  echo "[ENTRYPOINT] Adding --cpu flag (no GPU available)"
-  ARGS+=(--cpu)
-fi
-
 # Show memory usage before start
 if command -v nvidia-smi &> /dev/null; then
   echo "[ENTRYPOINT] GPU Memory before start at $(date):"
   nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits
 fi
 
+# Add CPU-only flag if no GPU
+if ! command -v nvidia-smi &> /dev/null || ! "$PYBIN" -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
+  echo "[ENTRYPOINT] Adding --cpu flag (no GPU available)"
+  ARGS+=(--cpu)
+fi
+
 # ComfyUI startup
 echo "[ENTRYPOINT] Starting ComfyUI with args: ${ARGS[*]}"
-python3 main.py "${ARGS[@]}" 2>&1 | tee /mnt/netdrive/comfyui/main.log &
-COMFYUI_PID=$!
+"$PYBIN" main.py "${ARGS[@]}" 2>&1 | tee /mnt/netdrive/comfyui/main.log &
 
 # Wait for ComfyUI to start
 sleep 2
@@ -314,7 +335,7 @@ fi
 echo "[HEALTHCHECK] Waiting for ComfyUI web UI to be ready..."
 MAX_ROUNDS=10
 for ((i=1; i<=MAX_ROUNDS; i++)); do
-    if curl -s http://0.0.0.0:8188 > /dev/null 2>&1; then
+    if curl -s http://127.0.0.1:8188 > /dev/null 2>&1; then
         echo "[HEALTHCHECK] ✅ ComfyUI is up after $((i*30)) seconds."
         break
     fi
@@ -323,7 +344,7 @@ for ((i=1; i<=MAX_ROUNDS; i++)); do
 done
 
 # Notify if ComfyUI did not start within 10 rounds
-if ! curl -s http://0.0.0.0:8188 > /dev/null 2>&1; then
+if ! curl -s http://127.0.0.1:8188 > /dev/null 2>&1; then
     echo "[HEALTHCHECK] ⚠️  ComfyUI did not start within $((MAX_ROUNDS*30)) seconds."
 fi
 

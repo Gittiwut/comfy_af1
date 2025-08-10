@@ -1,12 +1,8 @@
-torch
-torchvision
 torchsde
-torchaudio
 pillow
 einops
 safetensors
 huggingface_hub
-xformers
 transformers
 numpy
 requests
