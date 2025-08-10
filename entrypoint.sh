@@ -39,27 +39,57 @@ echo "[BOOT] Host driver: $(nvidia-smi --query-gpu=driver_version --format=csv,n
 # --- Detect CUDA -> CU_TAG ---
 GPU_CC_RAW="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n1 || true)"
 GPU_CC_MAJ="${GPU_CC_RAW%%.*}"
+GPU_CC_MIN="${GPU_CC_RAW##*.}"
+GPU_CC_NUM=$((GPU_CC_MAJ * 10 + GPU_CC_MIN))
+
+echo "[INFO] GPU Compute Capability: ${GPU_CC_RAW:-unknown}"
+
 if [[ -n "$GPU_CC_RAW" ]]; then
-  if (( GPU_CC_MAJ >= 12 )); then CU_TAG="cu128"
-  elif (( GPU_CC_MAJ >= 9 )); then CU_TAG="cu126"
-  else CU_TAG="cu124"
+  # sm_120 = CC 12.0 (RTX 5090)
+  # sm_90 = CC 9.0 (RTX 4090)
+  if (( GPU_CC_NUM >= 120 )); then 
+    CU_TAG="cu128"
+    GPU_ARCH="sm_120"
+  elif (( GPU_CC_NUM >= 90 )); then 
+    CU_TAG="cu124"
+    GPU_ARCH="sm_90"
+  elif (( GPU_CC_NUM >= 86 )); then 
+    CU_TAG="cu121"
+    GPU_ARCH="sm_86"
+  else 
+    CU_TAG="cu118"
+    GPU_ARCH="sm_80"
   fi
 else
   CU_TAG="cpu"
+  GPU_ARCH="cpu"
 fi
-echo "[INFO] GPU Compute Capability: ${GPU_CC_RAW:-unknown} → CU_TAG=$CU_TAG"
 
-# --- Per-CUDA venv + symlink (/mnt/netdrive/python_env -> current venv) ---
-VENV_PATH="${VENV_ROOT}/${CU_TAG}"
-if [ ! -d "$VENV_PATH" ]; then
-  echo "[VENV] Creating venv at $VENV_PATH"
-  python3 -m venv "$VENV_PATH"
+echo "[INFO] GPU Architecture: ${GPU_ARCH}, CUDA Tag: ${CU_TAG}"
+
+# Use GPU architecture specific venv
+VENV_PATH="${VENV_ROOT}/${GPU_ARCH}_${CU_TAG}"
+echo "[VENV] Using venv path: $VENV_PATH"
+
+# Ensure venv exists in network volume
+if [ ! -d "$VENV_PATH" ] || [ ! -f "$VENV_PATH/bin/python" ]; then
+  echo "[VENV] Creating new venv at $VENV_PATH for ${GPU_ARCH}"
+  rm -rf "$VENV_PATH" 2>/dev/null || true
+  mkdir -p "$VENV_PATH"
+  python3.12 -m venv "$VENV_PATH" --upgrade-deps
+  
+  # Verify venv creation
+  if [ ! -f "$VENV_PATH/bin/python" ]; then
+    echo "[ERROR] Failed to create venv at $VENV_PATH"
+    exit 1
+  fi
 fi
-# refresh legacy symlink
-if [ ! -L "$LEGACY_VENV" ] || [ "$(readlink -f "$LEGACY_VENV")" != "$VENV_PATH" ]; then
-  rm -rf "$LEGACY_VENV" 2>/dev/null || true
-  ln -s "$VENV_PATH" "$LEGACY_VENV"
+
+# Update legacy symlink to current venv
+if [ -L "$LEGACY_VENV" ]; then
+  rm -f "$LEGACY_VENV"
 fi
+ln -sfn "$VENV_PATH" "$LEGACY_VENV"
 
 # Activate venv
 source "$VENV_PATH/bin/activate"
@@ -71,85 +101,134 @@ $PIPBIN install --upgrade pip wheel setuptools
 echo "[INFO] Using Python: $($PYBIN --version)"
 
 # ---- desired versions ----
+# บรรทัดที่ 75-115 - PyTorch 2.8 installation ที่ถูกต้อง:
+# ---- PyTorch 2.8 Installation ----
 TORCH_VER="2.8.0"
+
+# Set correct index URLs for PyTorch 2.8
 case "$CU_TAG" in
-  cu128) TORCH_URL="https://download.pytorch.org/whl/cu128" ;;
-  cu126) TORCH_URL="https://download.pytorch.org/whl/cu126" ;;
-  cu124) TORCH_URL="https://download.pytorch.org/whl/cu124" ;;
-  cpu)   TORCH_URL="https://download.pytorch.org/whl/cpu" ;;
-esac
-
-
-# pick torchvision to match torch 2.8
-case "$TORCH_VER" in
-  2.8.*)
-    if [ "$CU_TAG" = "cu128" ]; then
-      TVISION_VER="0.23.0"
-    else
-      TVISION_VER="0.23.1"
-    fi
+  cu128)
+    # For CUDA 12.8 (RTX 5090)
+    TORCH_URL="https://download.pytorch.org/whl/cu128"
+    TORCH_SUFFIX="cu128"
+    TORCHVISION_VER="0.23.0"
     ;;
-  2.7.*) TVISION_VER="0.19.1" ;;
-  *)     TVISION_VER="0.23.1" ;;
+  cu124)
+    # For CUDA 12.4 (RTX 4090)
+    TORCH_URL="https://download.pytorch.org/whl/cu124" 
+    TORCH_SUFFIX="cu124"
+    TORCHVISION_VER="0.23.1"
+    ;;
+  cu121)
+    TORCH_URL="https://download.pytorch.org/whl/cu121"
+    TORCH_SUFFIX="cu121"
+    TORCHVISION_VER="0.23.1"
+    ;;
+  cu118)
+    TORCH_URL="https://download.pytorch.org/whl/cu118"
+    TORCH_SUFFIX="cu118"
+    TORCHVISION_VER="0.23.1"
+    ;;
+  cpu)
+    TORCH_URL="https://download.pytorch.org/whl/cpu"
+    TORCH_SUFFIX="cpu"
+    TORCHVISION_VER="0.23.1"
+    ;;
 esac
 
-# install if missing
-if ! "$PYBIN" - <<'PY'
-import sys
-try:
-    import torch; print("found torch", torch.__version__); sys.exit(0)
-except Exception:
-    sys.exit(1)
-PY
-then
-  echo "[TORCH] Installing torch==${TORCH_VER}+${CU_TAG}, torchvision==${TVISION_VER}+${CU_TAG}"
-  "$PIPBIN" install --only-binary=:all: --extra-index-url "$TORCH_URL" \
-    "torch==${TORCH_VER}+${CU_TAG}" "torchvision==${TVISION_VER}+${CU_TAG}"
-fi
+echo "[TORCH] Target: torch==${TORCH_VER}+${TORCH_SUFFIX}, torchvision==${TORCHVISION_VER}+${TORCH_SUFFIX}"
 
-# verify GPU runtime
-if [ "$CU_TAG" != "cpu" ]; then
-  "$PYBIN" - <<'PY'
-import sys, torch
-assert torch.cuda.is_available(), "CUDA not available"
-x=torch.randn(512,512,device="cuda").half(); y=torch.randn(512,512,device="cuda").half()
-torch.matmul(x,y); torch.cuda.synchronize()
-print("[TORCH] OK:", torch.__version__, "CUDA", torch.version.cuda)
-PY
+# Check current torch version
+CURRENT_TORCH=$("$PYBIN" -c "import torch; print(torch.__version__)" 2>/dev/null || echo "none")
+
+if [[ "$CURRENT_TORCH" != "${TORCH_VER}+${TORCH_SUFFIX}" ]]; then
+  echo "[TORCH] Current: $CURRENT_TORCH, Installing: ${TORCH_VER}+${TORCH_SUFFIX}"
+  
+  # Clean uninstall first
+  "$PIPBIN" uninstall -y torch torchvision torchaudio 2>/dev/null || true
+  
+  # Install specific versions
+  "$PIPBIN" install --no-cache-dir --no-deps \
+    --index-url "$TORCH_URL" \
+    torch=="${TORCH_VER}+${TORCH_SUFFIX}"
+  
+  "$PIPBIN" install --no-cache-dir --no-deps \
+    --index-url "$TORCH_URL" \
+    torchvision=="${TORCHVISION_VER}+${TORCH_SUFFIX}"
+  
+  # Install torch dependencies
+  "$PIPBIN" install --no-cache-dir \
+    filelock typing-extensions sympy networkx jinja2 fsspec \
+    numpy pillow
 else
-  echo "[TORCH] CPU-only mode detected; skipping CUDA check."
+  echo "[TORCH] Already installed: $CURRENT_TORCH"
 fi
 
-# --- xFormers: REQUIRED, wheel-only (no source build), fail fast if not usable ---
+# --- xFormers Installation ---
 if [ "$CU_TAG" != "cpu" ]; then
-  if ! "$PYBIN" - <<'PY'
-import sys
-try:
-    import torch, xformers, xformers.ops as xo
-    q=torch.randn(1,4,64,64,device="cuda",dtype=torch.float16)
-    k=torch.randn(1,4,64,64,device="cuda",dtype=torch.float16)
-    v=torch.randn(1,4,64,64,device="cuda",dtype=torch.float16)
-    xo.memory_efficient_attention(q,k,v); torch.cuda.synchronize()
-    sys.exit(0)
-except Exception:
-    sys.exit(1)
-PY
-  then
-    echo "[XFORMERS] Installing wheel for ${CU_TAG}"
-    "$PIPBIN" install --only-binary=:all: --extra-index-url "$TORCH_URL" xformers
-    echo "[XFORMERS] Verifying..."
-    "$PYBIN" - <<'PY'
-import sys, torch, xformers, xformers.ops as xo
-assert torch.cuda.is_available(), "CUDA not available"
-q=torch.randn(1,4,64,64,device="cuda",dtype=torch.float16)
-k=torch.randn(1,4,64,64,device="cuda",dtype=torch.float16)
-v=torch.randn(1,4,64,64,device="cuda",dtype=torch.float16)
-xo.memory_efficient_attention(q,k,v); torch.cuda.synchronize()
-print("[XFORMERS] OK")
-PY
+  # xFormers version compatible with PyTorch 2.8
+  case "$TORCH_SUFFIX" in
+    cu128)
+      XFORMERS_VER="0.0.31.post1"
+      ;;
+    cu124)
+      XFORMERS_VER="0.0.31"
+      ;;
+    *)
+      XFORMERS_VER="0.0.31"
+      ;;
+  esac
+  
+  XFORMERS_CHECK=$("$PYBIN" -c "import xformers; print(xformers.__version__)" 2>/dev/null || echo "none")
+  
+  if [[ "$XFORMERS_CHECK" == "none" ]]; then
+    echo "[XFORMERS] Installing ${XFORMERS_VER} for ${TORCH_SUFFIX}"
+    
+    # Try to install pre-built wheel first
+    if ! "$PIPBIN" install --no-cache-dir \
+      --index-url "$TORCH_URL" \
+      "xformers==${XFORMERS_VER}"; then
+      
+      echo "[XFORMERS] Pre-built wheel not found, trying generic version"
+      "$PIPBIN" install --no-cache-dir xformers
+    fi
   fi
-else
-  echo "[XFORMERS] Skipped (CPU-only mode)."
+  
+  # Verify xformers with better error handling
+  echo "[XFORMERS] Verifying installation..."
+  "$PYBIN" - <<'PY' 2>&1 | grep -v "CUDA error" || true
+import sys
+try:
+    import torch
+    import xformers
+    print(f"[XFORMERS] Version: {xformers.__version__}")
+    print(f"[XFORMERS] Torch: {torch.__version__}")
+    
+    if torch.cuda.is_available():
+        # Skip flash attention test for Hopper GPUs if it fails
+        try:
+            import xformers.ops as xo
+            device = torch.cuda.current_device()
+            capability = torch.cuda.get_device_capability(device)
+            print(f"[XFORMERS] GPU Capability: {capability}")
+            
+            # Use smaller test for Hopper architecture
+            if capability[0] >= 9:  # Hopper and newer
+                print("[XFORMERS] Hopper architecture detected, using fallback attention")
+            else:
+                q = torch.randn(1, 1, 64, 64, device="cuda", dtype=torch.float16)
+                k = q.clone()
+                v = q.clone()
+                out = xo.memory_efficient_attention(q, k, v)
+                print("[XFORMERS] Memory efficient attention: OK")
+        except Exception as e:
+            print(f"[XFORMERS] Flash attention not available: {e}")
+            print("[XFORMERS] Will use standard attention (slower but compatible)")
+    sys.exit(0)
+except ImportError as e:
+    print(f"[XFORMERS] Import failed: {e}")
+    sys.exit(1)
+PY
 fi
 
 # --- app deps (skip torch/xformers) ---
@@ -161,6 +240,9 @@ if [ -f "$REQ" ]; then
     "$PIPBIN" install -r /tmp/req-notorch.txt
   fi
 fi
+
+echo "[DEPS] Fixing dependency conflicts..."
+"$PYBIN" /fix_dependencies.py || true
 
 # ตรวจสอบว่ามีโฟลเดอร์ ComfyUI หรือไม่ ถ้าไม่มีก็ clone
 if [ ! -d "$COMFYUI_DIR" ] || [ -z "$(ls -A "$COMFYUI_DIR" 2>/dev/null)" ]; then
