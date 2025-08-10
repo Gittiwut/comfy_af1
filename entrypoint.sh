@@ -19,7 +19,7 @@ export CUDA_MODULE_LOADING=LAZY
 GPU_ARCH=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | tr -d '.' || echo "0")
 if [[ "$GPU_ARCH" =~ ^[0-9]+$ ]] && [[ "$GPU_ARCH" -ge "90" ]]; then
   echo "[INFO] Hopper/Ada GPU detected, setting compatibility flags"
-  export XFORMERS_DISABLE_FLASH_CPU=1
+  export XFORMERS_DISABLE_FLASH_ATTN=1
 fi
 
 # --- Normalize ENV values ---
@@ -189,17 +189,17 @@ if [ "$CU_TAG" != "cpu" ]; then
     echo "[XFORMERS] Method 1 failed, trying alternative installation method"
   
     # Method 2: Install with constraint file
-    echo "torch==${TORCH_VER}+${CU_TAG}" > /tmp/constraints.txt
-    if ! "$PIPBIN" install --no-cache-dir \
-      --constraint /tmp/constraints.txt \
-      --extra-index-url "$TORCH_URL" xformers; then
-    
-    echo "[WARNING] xFormers installation failed, continuing without it"
-    rm -f /tmp/constraints.txt
-  else
-    rm -f /tmp/constraints.txt
+      echo "torch==${TORCH_VER}+${CU_TAG}" > /tmp/constraints.txt
+      if ! "$PIPBIN" install --no-cache-dir \
+        --constraint /tmp/constraints.txt \
+        --extra-index-url "$TORCH_URL" xformers; then
+      
+      echo "[WARNING] xFormers installation failed, continuing without it"
+      rm -f /tmp/constraints.txt
+    else
+      rm -f /tmp/constraints.txt
+    fi
   fi
-fi
   
   # Verify torch wasn't downgraded
   TORCH_AFTER=$("$PYBIN" -c "import torch; print(torch.__version__)" 2>/dev/null)
