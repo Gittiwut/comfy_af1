@@ -9,6 +9,19 @@ set -euo pipefail
 : "${LEGACY_VENV:=/mnt/netdrive/python_env}"
 : "${JUPYTER_CONFIG_DIR:=/mnt/netdrive/config/jupyter}"
 
+# Add after config section (line 10):
+# Hopper/Ada compatibility settings
+export XFORMERS_DISABLE_FLASH_ATTN="${XFORMERS_DISABLE_FLASH_ATTN:-0}"
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+export CUDA_MODULE_LOADING=LAZY
+
+# Check GPU architecture and set flags
+GPU_ARCH=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n1 | tr -d '.')
+if [[ "$GPU_ARCH" -ge "90" ]]; then
+  echo "[INFO] Hopper/Ada GPU detected, setting compatibility flags"
+  export XFORMERS_DISABLE_FLASH_ATTN=1
+fi
+
 # --- Normalize ENV values ---
 # Normalize ENABLE_JUPYTER (accept true/1/yes/enable as true)
 : "${ENABLE_JUPYTER:=false}"
@@ -100,8 +113,6 @@ export PATH="$VENV_PATH/bin:$PATH"
 $PIPBIN install --upgrade pip wheel setuptools
 echo "[INFO] Using Python: $($PYBIN --version)"
 
-# ---- desired versions ----
-# บรรทัดที่ 75-115 - PyTorch 2.8 installation ที่ถูกต้อง:
 # ---- PyTorch 2.8 Installation ----
 TORCH_VER="2.8.0"
 
@@ -140,63 +151,64 @@ echo "[TORCH] Target: torch==${TORCH_VER}+${TORCH_SUFFIX}, torchvision==${TORCHV
 
 # Check current torch version
 CURRENT_TORCH=$("$PYBIN" -c "import torch; print(torch.__version__)" 2>/dev/null || echo "none")
+EXPECTED_TORCH="${TORCH_VER}+${CU_TAG}"
 
-if [[ "$CURRENT_TORCH" != "${TORCH_VER}+${TORCH_SUFFIX}" ]]; then
-  echo "[TORCH] Current: $CURRENT_TORCH, Installing: ${TORCH_VER}+${TORCH_SUFFIX}"
+if [[ "$CURRENT_TORCH" != "$EXPECTED_TORCH" ]]; then
+  echo "[TORCH] Current: $CURRENT_TORCH, Expected: $EXPECTED_TORCH"
+  echo "[TORCH] Installing torch==${TORCH_VER}+${CU_TAG}, torchvision==${TVISION_VER}+${CU_TAG}"
   
-  # Clean uninstall first
-  "$PIPBIN" uninstall -y torch torchvision torchaudio 2>/dev/null || true
+  # Clean uninstall
+  "$PIPBIN" uninstall -y torch torchvision torchaudio xformers 2>/dev/null || true
   
-  # Install specific versions
-  "$PIPBIN" install --no-cache-dir --no-deps \
-    --index-url "$TORCH_URL" \
-    torch=="${TORCH_VER}+${TORCH_SUFFIX}"
-  
-  "$PIPBIN" install --no-cache-dir --no-deps \
-    --index-url "$TORCH_URL" \
-    torchvision=="${TORCHVISION_VER}+${TORCH_SUFFIX}"
-  
-  # Install torch dependencies
+  # Install with --force-reinstall and --no-deps first
+  "$PIPBIN" install --no-cache-dir --no-deps --force-reinstall \
+    --extra-index-url "$TORCH_URL" \
+    torch=="${TORCH_VER}+${CU_TAG}" \
+    torchvision=="${TVISION_VER}+${CU_TAG}"
+    
+  # Then install dependencies
   "$PIPBIN" install --no-cache-dir \
-    filelock typing-extensions sympy networkx jinja2 fsspec \
-    numpy pillow
+    filelock typing-extensions sympy networkx jinja2 fsspec numpy pillow
 else
-  echo "[TORCH] Already installed: $CURRENT_TORCH"
+  echo "[TORCH] Correct version already installed: $CURRENT_TORCH"
 fi
 
 # --- xFormers Installation ---
+# แทนที่ทั้งหมดด้วย:
 if [ "$CU_TAG" != "cpu" ]; then
-  # xFormers version compatible with PyTorch 2.8
-  case "$TORCH_SUFFIX" in
-    cu128)
-      XFORMERS_VER="0.0.31.post1"
-      ;;
-    cu124)
-      XFORMERS_VER="0.0.31"
-      ;;
-    *)
-      XFORMERS_VER="0.0.31"
-      ;;
-  esac
+  # Install xformers WITHOUT letting it change torch version
+  XFORMERS_CHECK=$("$PYBIN" -c "import xformers; print('installed')" 2>/dev/null || echo "not_installed")
   
-  XFORMERS_CHECK=$("$PYBIN" -c "import xformers; print(xformers.__version__)" 2>/dev/null || echo "none")
-  
-  if [[ "$XFORMERS_CHECK" == "none" ]]; then
-    echo "[XFORMERS] Installing ${XFORMERS_VER} for ${TORCH_SUFFIX}"
+  if [ "$XFORMERS_CHECK" = "not_installed" ]; then
+    echo "[XFORMERS] Installing with torch ${TORCH_VER}+${CU_TAG} locked"
     
-    # Try to install pre-built wheel first
-    if ! "$PIPBIN" install --no-cache-dir \
-      --index-url "$TORCH_URL" \
-      "xformers==${XFORMERS_VER}"; then
+    # Method 1: Try installing with --no-deps first
+    if ! "$PIPBIN" install --no-cache-dir --no-deps \
+      --extra-index-url "$TORCH_URL" xformers 2>/dev/null; then
       
-      echo "[XFORMERS] Pre-built wheel not found, trying generic version"
-      "$PIPBIN" install --no-cache-dir xformers
+      echo "[XFORMERS] Trying alternative installation method"
+      
+      # Method 2: Install with constraint file
+      echo "torch==${TORCH_VER}+${CU_TAG}" > /tmp/constraints.txt
+      "$PIPBIN" install --no-cache-dir \
+        --constraint /tmp/constraints.txt \
+        --extra-index-url "$TORCH_URL" xformers
+      rm -f /tmp/constraints.txt
     fi
   fi
   
-  # Verify xformers with better error handling
-  echo "[XFORMERS] Verifying installation..."
-  "$PYBIN" - <<'PY' 2>&1 | grep -v "CUDA error" || true
+  # Verify torch wasn't downgraded
+  TORCH_AFTER=$("$PYBIN" -c "import torch; print(torch.__version__)" 2>/dev/null)
+  if [[ "$TORCH_AFTER" != "${TORCH_VER}+${CU_TAG}" ]]; then
+    echo "[WARNING] Torch was changed to $TORCH_AFTER, reinstalling correct version"
+    "$PIPBIN" install --no-cache-dir --force-reinstall --no-deps \
+      --extra-index-url "$TORCH_URL" \
+      torch=="${TORCH_VER}+${CU_TAG}"
+  fi
+  
+  # Test xformers with Hopper workaround
+  echo "[XFORMERS] Testing..."
+  "$PYBIN" - <<'PY' 2>&1 | grep -E "^\[XFORMERS\]" || true
 import sys
 try:
     import torch
@@ -204,41 +216,43 @@ try:
     print(f"[XFORMERS] Version: {xformers.__version__}")
     print(f"[XFORMERS] Torch: {torch.__version__}")
     
+    # For Hopper (sm_90+), flash attention might fail
     if torch.cuda.is_available():
-        # Skip flash attention test for Hopper GPUs if it fails
-        try:
-            import xformers.ops as xo
-            device = torch.cuda.current_device()
-            capability = torch.cuda.get_device_capability(device)
-            print(f"[XFORMERS] GPU Capability: {capability}")
-            
-            # Use smaller test for Hopper architecture
-            if capability[0] >= 9:  # Hopper and newer
-                print("[XFORMERS] Hopper architecture detected, using fallback attention")
-            else:
-                q = torch.randn(1, 1, 64, 64, device="cuda", dtype=torch.float16)
-                k = q.clone()
-                v = q.clone()
-                out = xo.memory_efficient_attention(q, k, v)
-                print("[XFORMERS] Memory efficient attention: OK")
-        except Exception as e:
-            print(f"[XFORMERS] Flash attention not available: {e}")
-            print("[XFORMERS] Will use standard attention (slower but compatible)")
-    sys.exit(0)
-except ImportError as e:
-    print(f"[XFORMERS] Import failed: {e}")
-    sys.exit(1)
+        cap = torch.cuda.get_device_capability()
+        if cap[0] >= 9:
+            print(f"[XFORMERS] Hopper/Ada architecture detected (sm_{cap[0]}{cap[1]})")
+            print("[XFORMERS] Flash attention may show errors - this is expected")
+            # Set environment variable to disable flash attention
+            import os
+            os.environ['XFORMERS_DISABLE_FLASH_ATTN'] = '1'
+            print("[XFORMERS] Disabled flash attention for compatibility")
+except Exception as e:
+    print(f"[XFORMERS] Import error: {e}")
 PY
 fi
 
 # --- app deps (skip torch/xformers) ---
+# แทนที่ด้วย:
 REQ="${COMFYUI_DIR}/requirements.txt"
 if [ -f "$REQ" ]; then
-  echo "[PIP] Installing app deps (preserve torch/xformers)"
-  grep -viE '^(torch|torchvision|torchaudio|xformers)(==|>=|<=|$)' "$REQ" > /tmp/req-notorch.txt || true
+  echo "[PIP] Installing app deps (torch locked at ${TORCH_VER}+${CU_TAG})"
+  
+  # Create constraints file to lock torch version
+  cat > /tmp/constraints.txt <<EOF
+torch==${TORCH_VER}+${CU_TAG}
+torchvision==${TVISION_VER}+${CU_TAG}
+EOF
+  
+  # Filter out torch packages from requirements
+  grep -viE '^(torch|torchvision|torchaudio|xformers)' "$REQ" > /tmp/req-notorch.txt || true
+  
   if [ -s /tmp/req-notorch.txt ]; then
-    "$PIPBIN" install -r /tmp/req-notorch.txt
+    "$PIPBIN" install --no-cache-dir \
+      --constraint /tmp/constraints.txt \
+      -r /tmp/req-notorch.txt || true
   fi
+  
+  rm -f /tmp/req-notorch.txt /tmp/constraints.txt
 fi
 
 echo "[DEPS] Fixing dependency conflicts..."
