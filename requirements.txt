@@ -1,4 +1,3 @@
-torchsde
 pillow
 einops
 safetensors
@@ -15,6 +14,6 @@ piexif
 segment_anything
 facexlib
 insightface
-onnxruntime
 ftfy
 timm
+diffusers

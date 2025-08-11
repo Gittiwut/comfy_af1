@@ -108,8 +108,9 @@ async def download_with_aiohttp(url, dest_dir, category=None):
     """Download using aiohttp for better performance"""
     try:
         print(f"[MODEL] (aiohttp) Downloading: {url}")
-        timeout = aiohttp.ClientTimeout(total=300)
-        connector = aiohttp.TCPConnector(limit=100, limit_per_host=10)
+        # Increase total timeout to handle large model files
+        timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=None, sock_connect=30)
+        connector = aiohttp.TCPConnector(limit=64, limit_per_host=8, enable_cleanup_closed=True)
         headers = {}
 
         # Add Authorization header for Civitai

@@ -58,15 +58,35 @@ async def install_requirements_single(req_path, max_retries=2):
             except Exception as e:
                 print(f"[DEBUG] Network connectivity: SLOW ({e})")
 
-            # เพิ่ม Timeout Protection
-            proc = await asyncio.wait_for(
-                asyncio.create_subprocess_exec(
-                    "uv", "pip", "install", 
-                    "--python=/mnt/netdrive/python_env/bin/python", 
-                    "--no-cache", "-r", str(req_path),
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                ),
-                timeout=180
+            # Run install without a hard timeout to avoid aborting long installs
+            # Use constraints to prevent torch/xformers from being changed by custom node requirements
+            constraints_path = "/tmp/constraints_custom_nodes.txt"
+            try:
+                torch_ver = os.environ.get("TORCH_VER", "2.8.0")
+                cu_tag = os.environ.get("CU_TAG", "cpu")
+                with open(constraints_path, "w") as cf:
+                    cf.write(f"torch=={torch_ver}+{cu_tag}\n")
+                    # torchvision is often pulled transitively
+                    # NOTE: TVISION_VER is not exported here; rely on torch pin; torchvision resolves accordingly
+                extra_index = []
+                if cu_tag != "cpu":
+                    extra_index = ["--extra-index-url", f"https://download.pytorch.org/whl/{cu_tag}"]
+            except Exception:
+                constraints_path = None
+                extra_index = []
+
+            args = [
+                "uv", "pip", "install",
+                "--python=/mnt/netdrive/python_env/bin/python",
+                "--no-cache",
+            ]
+            if constraints_path:
+                args += ["--constraint", constraints_path]
+            args += extra_index + ["-r", str(req_path)]
+
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             
             stdout, stderr = await proc.communicate()

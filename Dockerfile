@@ -24,9 +24,9 @@ RUN mkdir -p /mnt/netdrive/comfyui \
 
 # system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-venv python3-pip \
+    python3 python3-venv python3-pip python3-dev \
     git curl wget ca-certificates build-essential pkg-config \
-    libgl1 libglib2.0-0 && \
+    libgl1 libglib2.0-0 aria2 ffmpeg && \
   rm -rf /var/lib/apt/lists/*
 
 # install UV

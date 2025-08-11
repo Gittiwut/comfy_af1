@@ -9,6 +9,11 @@ set -euo pipefail
 : "${LEGACY_VENV:=/mnt/netdrive/python_env}"
 : "${JUPYTER_CONFIG_DIR:=/mnt/netdrive/config/jupyter}"
 
+# Service network defaults (overridable by env)
+: "${COMFYUI_HOST:=0.0.0.0}"
+: "${COMFYUI_PORT:=8188}"
+: "${JUPYTER_PORT:=8888}"
+
 # Add after config section (line 10):
 # Hopper/Ada compatibility settings
 export XFORMERS_DISABLE_FLASH_ATTN="${XFORMERS_DISABLE_FLASH_ATTN:-0}"
@@ -30,14 +35,24 @@ case "${ENABLE_JUPYTER,,}" in
   *)                 ENABLE_JUPYTER=false ;;
 esac
 
-# --- Network caches (opt-in บางตัว) ---
-DRV="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n1 || echo unknown)"
-CACHE_ROOT="/mnt/netdrive/cache/${CU_TAG}_${DRV}"
-
 # --- Derived paths ---
 export COMFYUI_DIR="$COMFYUI_ROOT"
 export COMFYUI_CUSTOM_NODES="$COMFYUI_DIR/custom_nodes"
 export COMFYUI_MODELS="$COMFYUI_DIR/models"
+
+# --- Ensure network volume is mounted before proceeding ---
+if command -v mountpoint >/dev/null 2>&1; then
+  if ! mountpoint -q /mnt/netdrive; then
+    echo "[BOOT] Waiting for /mnt/netdrive to be mounted..."
+    for i in {1..60}; do mountpoint -q /mnt/netdrive && break; sleep 1; done
+  fi
+else
+  for i in {1..60}; do grep -qs " /mnt/netdrive " /proc/mounts && break; sleep 1; done
+fi
+if ! grep -qs " /mnt/netdrive " /proc/mounts; then
+  echo "[ERROR] /mnt/netdrive is not mounted. Abort to avoid installing into container."
+  exit 1
+fi
 
 # --- Create required dirs ---
 mkdir -p "$PIP_CACHE_DIR" "$TMPDIR" "$VENV_ROOT" "$COMFYUI_ROOT"
@@ -46,6 +61,9 @@ unset PIP_INDEX_URL || true
 unset PIP_EXTRA_INDEX_URL || true
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 export PIP_CONFIG_FILE=/dev/null
+export PYTHONNOUSERSITE=1
+export PIP_USER=0
+export PIP_PREFER_BINARY=1
 
 echo "[BOOT] Host driver: $(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n1 || echo 'unknown')"
 
@@ -79,9 +97,18 @@ else
 fi
 
 echo "[INFO] GPU Architecture: ${GPU_ARCH}, CUDA Tag: ${CU_TAG}"
+export CU_TAG
+
+# --- Network caches ---
+DRV="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n1 || echo unknown)"
+CACHE_ROOT="/mnt/netdrive/cache/${CU_TAG}_${DRV}"
 
 # Use GPU architecture specific venv
-VENV_PATH="${VENV_ROOT}/${GPU_ARCH}_${CU_TAG}"
+if [[ "$GPU_ARCH" == "cpu" ]]; then
+  VENV_PATH="${VENV_ROOT}/cpu"
+else
+  VENV_PATH="${VENV_ROOT}/${GPU_ARCH}_${CU_TAG}"
+fi
 echo "[VENV] Using venv path: $VENV_PATH"
 
 # Ensure venv exists in network volume
@@ -89,8 +116,20 @@ if [ ! -d "$VENV_PATH" ] || [ ! -f "$VENV_PATH/bin/python" ]; then
   echo "[VENV] Creating new venv at $VENV_PATH for ${GPU_ARCH}"
   rm -rf "$VENV_PATH" 2>/dev/null || true
   mkdir -p "$VENV_PATH"
-  python3.12 -m venv "$VENV_PATH" --upgrade-deps
-  
+  PYTHON_CMD="python3.12"
+  if ! command -v "$PYTHON_CMD" &> /dev/null; then
+    PYTHON_CMD="python3.11"
+    if ! command -v "$PYTHON_CMD" &> /dev/null; then
+      PYTHON_CMD="python3.10"
+      if ! command -v "$PYTHON_CMD" &> /dev/null; then
+        PYTHON_CMD="python3"
+      fi
+    fi
+  fi
+
+  echo "[VENV] Using Python: $PYTHON_CMD"
+  "$PYTHON_CMD" -m venv "$VENV_PATH" --upgrade-deps
+
   # Verify venv creation
   if [ ! -f "$VENV_PATH/bin/python" ]; then
     echo "[ERROR] Failed to create venv at $VENV_PATH"
@@ -110,11 +149,11 @@ PYBIN="$VENV_PATH/bin/python"
 PIPBIN="$VENV_PATH/bin/pip"
 export PATH="$VENV_PATH/bin:$PATH"
 
-$PIPBIN install --upgrade pip wheel setuptools
+"$PYBIN" -m pip install --upgrade pip wheel setuptools
 echo "[INFO] Using Python: $($PYBIN --version)"
 
 # ---- PyTorch 2.8 Installation ----
-TORCH_VER="2.8.0"
+export TORCH_VER="2.8.0"
 
 # Set correct index URLs for PyTorch 2.8
 case "$CU_TAG" in
@@ -158,23 +197,55 @@ if [[ "$CURRENT_TORCH" != "$EXPECTED_TORCH" ]]; then
   echo "[TORCH] Installing torch==${TORCH_VER}+${CU_TAG}, torchvision==${TVISION_VER}+${CU_TAG}"
   
   # Clean uninstall
-  "$PIPBIN" uninstall -y torch torchvision torchaudio xformers 2>/dev/null || true
+  "$PYBIN" -m pip uninstall -y torch torchvision torchaudio xformers 2>/dev/null || true
   
   # Install with --force-reinstall and --no-deps first
-  "$PIPBIN" install --no-cache-dir --no-deps --force-reinstall \
-    --extra-index-url "$TORCH_URL" \
-    torch=="${TORCH_VER}+${CU_TAG}" \
-    torchvision=="${TVISION_VER}+${CU_TAG}"
+  "$PYBIN" -m pip install --no-cache-dir --force-reinstall \
+  --extra-index-url "$TORCH_URL" \
+  torch=="${TORCH_VER}+${CU_TAG}" \
+  torchvision=="${TVISION_VER}+${CU_TAG}"
     
   # Then install dependencies
-  "$PIPBIN" install --no-cache-dir \
+  "$PYBIN" -m pip install --no-cache-dir \
     filelock typing-extensions sympy networkx jinja2 fsspec numpy pillow
 else
   echo "[TORCH] Correct version already installed: $CURRENT_TORCH"
 fi
 
+# --- Ensure torchaudio/diffusers/insightface ---
+# Install torchaudio matching the Torch/CUDA version to satisfy audio nodes
+if ! "$PYBIN" - <<'PY' 2>/dev/null
+import torchaudio, sys; sys.exit(0)
+PY
+then
+  echo "[AUDIO] Installing torchaudio==${TORCH_VER}+${CU_TAG}"
+  if ! "$PIPBIN" install --no-cache-dir \
+    --extra-index-url "$TORCH_URL" \
+    torchaudio=="${TORCH_VER}+${CU_TAG}"; then
+    echo "[AUDIO] WARNING: Failed to install torchaudio for ${TORCH_VER}+${CU_TAG}. Continuing without it."
+  fi
+fi
+
+# Install diffusers if missing (required by some custom nodes)
+if ! "$PYBIN" - <<'PY' 2>/dev/null
+import diffusers, sys; sys.exit(0)
+PY
+then
+  echo "[DEPS] Installing diffusers"
+  "$PIPBIN" install --no-cache-dir diffusers || true
+fi
+
+# Install insightface if missing (required by PuLID and others)
+if ! "$PYBIN" - <<'PY' 2>/dev/null
+import insightface, sys; sys.exit(0)
+PY
+then
+  echo "[DEPS] Installing insightface"
+  # Prefer prebuilt wheels; fall back to source build if wheel unavailable
+  "$PIPBIN" install --no-cache-dir --prefer-binary insightface || "$PIPBIN" install --no-cache-dir insightface || true
+fi
+
 # --- xFormers Installation ---
-# แทนที่ทั้งหมดด้วย:
 if [ "$CU_TAG" != "cpu" ]; then
   # Install xformers WITHOUT letting it change torch version
   XFORMERS_CHECK=$("$PYBIN" -c "import xformers; print('installed')" 2>/dev/null || echo "not_installed")
@@ -183,7 +254,7 @@ if [ "$CU_TAG" != "cpu" ]; then
     echo "[XFORMERS] Installing with torch ${TORCH_VER}+${CU_TAG} locked"
     
     # Method 1: Try installing with --no-deps first
-  if ! "$PIPBIN" install --no-cache-dir --no-deps \
+    if ! "$PIPBIN" install --no-cache-dir --no-deps \
     --extra-index-url "$TORCH_URL" xformers 2>/dev/null; then
   
     echo "[XFORMERS] Method 1 failed, trying alternative installation method"
@@ -198,6 +269,7 @@ if [ "$CU_TAG" != "cpu" ]; then
       rm -f /tmp/constraints.txt
     else
       rm -f /tmp/constraints.txt
+      fi
     fi
   fi
   
@@ -235,46 +307,74 @@ except Exception as e:
 PY
 fi
 
+if ! "$PYBIN" - <<'PY' 2>/dev/null
+import xformers, torch; import sys; sys.exit(0)
+PY
+then
+  echo "[XFORMERS] Uninstalling due to incompatibility"
+  "$PYBIN" -m pip uninstall -y xformers || true
+  export XFORMERS_DISABLE_FLASH_ATTN=1
+fi
+
+# Get ComfyUI
+if [ ! -d "$COMFYUI_DIR" ] || [ -z "$(ls -A "$COMFYUI_DIR" 2>/dev/null)" ]; then
+  echo "[ENTRYPOINT] ComfyUI directory not found. Cloning from GitHub..."
+  git clone --depth=1 https://github.com/comfyanonymous/ComfyUI.git "$COMFYUI_DIR"
+fi
+
 # --- app deps (skip torch/xformers) ---
-# แทนที่ด้วย:
 REQ="${COMFYUI_DIR}/requirements.txt"
 if [ -f "$REQ" ]; then
   echo "[PIP] Installing app deps (torch locked at ${TORCH_VER}+${CU_TAG})"
-  
-  # Create constraints file to lock torch version
   cat > /tmp/constraints.txt <<EOF
 torch==${TORCH_VER}+${CU_TAG}
 torchvision==${TVISION_VER}+${CU_TAG}
 EOF
-  
-  # Filter out torch packages from requirements
   grep -viE '^(torch|torchvision|torchaudio|xformers)' "$REQ" > /tmp/req-notorch.txt || true
-  
   if [ -s /tmp/req-notorch.txt ]; then
-    "$PIPBIN" install --no-cache-dir \
+    "$PYBIN" -m pip install --no-cache-dir \
       --constraint /tmp/constraints.txt \
       -r /tmp/req-notorch.txt || true
   fi
-  
+
+  if ! "$PYBIN" - <<'PY' 2>/dev/null
+import importlib.util, sys
+sys.exit(0 if importlib.util.find_spec('torchsde') else 1)
+PY
+  then
+    echo "[DEPS] Installing torchsde"
+    "$PYBIN" -m pip install --no-cache-dir \
+      --constraint /tmp/constraints.txt \
+      torchsde==0.2.6 || "$PYBIN" -m pip install --no-cache-dir torchsde || true
+  fi
+
+  # cleanup temporary files
   rm -f /tmp/req-notorch.txt /tmp/constraints.txt
 fi
 
-# ตรวจสอบว่ามีโฟลเดอร์ ComfyUI หรือไม่ ถ้าไม่มีก็ clone
-if [ ! -d "$COMFYUI_DIR" ] || [ -z "$(ls -A "$COMFYUI_DIR" 2>/dev/null)" ]; then
-  echo "[ENTRYPOINT] ComfyUI directory not found. Cloning from GitHub..."
-    git clone --depth=1 https://github.com/comfyanonymous/ComfyUI.git "$COMFYUI_DIR"
-fi
-
 # --- Jupyter (optional; same venv) ---
-if [ "$ENABLE_JUPYTER" = "true" ]; then
-  echo "[JUPYTER] Enabling JupyterLab on :8888"
-  "$PIPBIN" install --no-cache-dir jupyter jupyterlab
+if [ "${ENABLE_JUPYTER}" = "true" ]; then
+  echo "[JUPYTER] Enabling JupyterLab on :$JUPYTER_PORT"
+  "$PYBIN" -m pip install --no-cache-dir jupyter jupyterlab
   mkdir -p "$JUPYTER_CONFIG_DIR"
-  nohup "$PYBIN" -m jupyter lab --ip=0.0.0.0 --port=8888 --no-browser \
+  nohup "$PYBIN" -m jupyter lab --ip=0.0.0.0 --port="$JUPYTER_PORT" --no-browser --allow-root \
     --ServerApp.token='' --ServerApp.password='' \
     --ServerApp.allow_origin='*' --ServerApp.allow_remote_access=True \
     --ServerApp.port_retries=0 --ServerApp.root_dir=/mnt/netdrive \
     > /mnt/netdrive/jupyter.log 2>&1 &
+
+  for i in {1..12}; do
+    sleep 5
+    if curl -sSf http://127.0.0.1:"$JUPYTER_PORT" >/dev/null 2>&1; then echo "[JUPYTER] Up"; break; fi
+    if [ $i -eq 12 ]; then
+      echo "[JUPYTER] Not up, retry once"; pkill -f "jupyter.*lab" || true
+      nohup "$PYBIN" -m jupyter lab --ip=0.0.0.0 --port="$JUPYTER_PORT" --no-browser --allow-root \
+        --ServerApp.token='' --ServerApp.password='' \
+        --ServerApp.allow_origin='*' --ServerApp.allow_remote_access=True \
+        --ServerApp.port_retries=0 --ServerApp.root_dir=/mnt/netdrive \
+        >> /mnt/netdrive/jupyter.log 2>&1 &
+    fi
+  done
 fi
 
 # System Information
@@ -390,8 +490,8 @@ cd "$COMFYUI_DIR"
 
 # Set default arguments
 ARGS=(
-  --listen 0.0.0.0
-  --port 8188
+  --listen "$COMFYUI_HOST"
+  --port "$COMFYUI_PORT"
   --preview-method auto
 )
 
@@ -406,14 +506,25 @@ if command -v nvidia-smi &> /dev/null; then
   nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits
 fi
 
-# Add CPU-only flag if no GPU
-if ! command -v nvidia-smi &> /dev/null || ! "$PYBIN" -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
-  echo "[ENTRYPOINT] Adding --cpu flag (no GPU available)"
+ok=0
+for i in {1..3}; do
+  if "$PYBIN" - <<'PY' 2>/dev/null
+import torch, sys
+sys.exit(0 if torch.cuda.is_available() else 1)
+PY
+  then
+    ok=1
+    break
+  fi
+  sleep 2
+done
+if [ $ok -eq 0 ]; then
+  echo "[ENTRYPOINT] Adding --cpu flag (CUDA not available in torch)"
   ARGS+=(--cpu)
 fi
 
 # ComfyUI startup
-echo "[ENTRYPOINT] Starting ComfyUI with args: ${ARGS[*]}"
+echo "[ENTRYPOINT] Starting ComfyUI on ${COMFYUI_HOST}:${COMFYUI_PORT} with args: ${ARGS[*]}"
 "$PYBIN" main.py "${ARGS[@]}" 2>&1 | tee /mnt/netdrive/comfyui/main.log &
 
 # Wait for ComfyUI to start
@@ -424,10 +535,10 @@ if ! pgrep -f "python.*main.py" > /dev/null; then
 fi
 
 # Health check: Main.py
-echo "[HEALTHCHECK] Waiting for ComfyUI web UI to be ready..."
+echo "[HEALTHCHECK] Waiting for ComfyUI web UI to be ready on ${COMFYUI_HOST}:${COMFYUI_PORT}..."
 MAX_ROUNDS=10
 for ((i=1; i<=MAX_ROUNDS; i++)); do
-    if curl -s http://127.0.0.1:8188 > /dev/null 2>&1; then
+    if curl -s http://${COMFYUI_HOST}:${COMFYUI_PORT} > /dev/null 2>&1; then
         echo "[HEALTHCHECK] ✅ ComfyUI is up after $((i*30)) seconds."
         break
     fi
@@ -436,7 +547,7 @@ for ((i=1; i<=MAX_ROUNDS; i++)); do
 done
 
 # Notify if ComfyUI did not start within 10 rounds
-if ! curl -s http://127.0.0.1:8188 > /dev/null 2>&1; then
+if ! curl -s http://${COMFYUI_HOST}:${COMFYUI_PORT} > /dev/null 2>&1; then
     echo "[HEALTHCHECK] ⚠️  ComfyUI did not start within $((MAX_ROUNDS*30)) seconds."
 fi
 
