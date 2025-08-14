@@ -35,13 +35,12 @@ RUN mkdir -p /mnt/netdrive/comfyui \
 # Install system dependencies - streamlined for multi-GPU support
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common && \
-    add-apt-repository ppa:deadsnakes/ppa && \
+    add-apt-repository -y ppa:deadsnakes/ppa && \
     apt-get update && apt-get install -y --no-install-recommends \
     python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev \
     git curl wget ca-certificates build-essential pkg-config \
     libgl1 libglib2.0-0 aria2 ffmpeg \
-    libnccl2 && \
-    rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 # Install UV for faster dependency management
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
