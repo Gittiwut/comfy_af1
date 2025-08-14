@@ -224,11 +224,6 @@ else:
     return 1
 }
 
-# In the main installation section, for Blackwell:
-if [[ "$ARCH_TAG" == "blackwell" ]] && [[ "$SKIP_XFORMERS" != "1" ]]; then
-    install_xformers_blackwell
-fi
-
 # Set architecture-specific environment variables
 export CUDA_ARCH_TAG="$ARCH_TAG"
 
@@ -363,7 +358,7 @@ if [[ "$PACKAGES_INSTALLED" == "false" ]]; then
       rm -f "$TORCH_LOCK_FILE"
     fi
   fi
-  
+
   echo "📦 [DEPS] Installing packages for $ARCH_TAG architecture..."
   
   # Create lock file
@@ -391,6 +386,11 @@ if [[ "$PACKAGES_INSTALLED" == "false" ]]; then
     rm -f "$TORCH_LOCK_FILE"
     exit 1
   fi
+fi
+
+# In the main installation section, for Blackwell:
+if [[ "$ARCH_TAG" == "blackwell" ]] && [[ "$SKIP_XFORMERS" != "1" ]]; then
+    install_xformers_blackwell
 fi
 
 # Comprehensive verification
