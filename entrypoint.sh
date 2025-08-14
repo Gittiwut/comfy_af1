@@ -234,13 +234,23 @@ if [[ "$PACKAGES_INSTALLED" == "false" ]]; then
   trap 'rm -f "$TORCH_LOCK_FILE"' EXIT INT TERM
   
   # Install with architecture-specific constraints
-  if "$PIPBIN" install --no-cache-dir --constraint "$CONSTRAINTS_PATH" \
-    -r "$CONSTRAINTS_PATH"; then
+  # First install core requirements, then constraints
+  if "$PIPBIN" install --no-cache-dir -r "/requirements.txt"; then
+    echo "✅ [DEPS] Core requirements installed"
     
-    echo "✅ [DEPS] Package installation completed"
-    rm -f "$TORCH_LOCK_FILE"
+    # Then install architecture-specific packages
+    if "$PIPBIN" install --no-cache-dir --constraint "$CONSTRAINTS_PATH" \
+      torch torchvision torchaudio xformers triton; then
+      
+      echo "✅ [DEPS] Architecture-specific packages installed"
+      rm -f "$TORCH_LOCK_FILE"
+    else
+      echo "[ERROR] Architecture-specific package installation failed"
+      rm -f "$TORCH_LOCK_FILE"
+      exit 1
+    fi
   else
-    echo "[ERROR] Package installation failed"
+    echo "[ERROR] Core requirements installation failed"
     rm -f "$TORCH_LOCK_FILE"
     exit 1
   fi
@@ -332,8 +342,9 @@ if [ "$ENABLE_JUPYTER" = "true" ]; then
   fi
 fi
 
-# Parallel setup
+# Parallel setup - NO TIMEOUT for slow connections
 echo "🏗️  [SETUP] Starting parallel setup..."
+echo "[INFO] No timeout set - setup will complete regardless of time"
 
 "$PYBIN" /setup_custom_nodes.py > /mnt/netdrive/comfyui/setup_custom_nodes.log 2>&1 &
 CUSTOM_NODES_PID=$!
@@ -341,17 +352,26 @@ CUSTOM_NODES_PID=$!
 "$PYBIN" /download_models.py > /mnt/netdrive/comfyui/download_models.log 2>&1 &
 DOWNLOAD_MODELS_PID=$!
 
-# Monitor setup with progress feedback
+# Monitor setup with progress feedback - NO TIMEOUT
 monitor_start_time=$(date +%s)
+echo "[INFO] Monitoring setup progress (no timeout)..."
 while kill -0 $CUSTOM_NODES_PID 2>/dev/null || kill -0 $DOWNLOAD_MODELS_PID 2>/dev/null; do
     current_time=$(date +%s)
     elapsed=$((current_time - monitor_start_time))
     
-    if (( elapsed % 30 == 0 )) && (( elapsed > 0 )); then
-        echo "⏳ [SETUP] Progress: ${elapsed}s elapsed..."
+    # Show progress every 60 seconds
+    if (( elapsed % 60 == 0 )) && (( elapsed > 0 )); then
+        echo "⏳ [SETUP] Progress: ${elapsed}s elapsed - still running..."
+        # Show recent activity from logs
+        if [ -f /mnt/netdrive/comfyui/setup_custom_nodes.log ]; then
+            echo "   Custom nodes: $(tail -n 1 /mnt/netdrive/comfyui/setup_custom_nodes.log 2>/dev/null | head -c 80)..."
+        fi
+        if [ -f /mnt/netdrive/comfyui/download_models.log ]; then
+            echo "   Models: $(tail -n 1 /mnt/netdrive/comfyui/download_models.log 2>/dev/null | head -c 80)..."
+        fi
     fi
     
-    sleep 5
+    sleep 10  # Check every 10 seconds
 done
 
 wait $CUSTOM_NODES_PID $DOWNLOAD_MODELS_PID 2>/dev/null || true

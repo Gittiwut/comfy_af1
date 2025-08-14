@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 import re
 
 # เพิ่ม concurrency limit
-MAX_CONCURRENT_DOWNLOADS = 8
+MAX_CONCURRENT_DOWNLOADS = 6  # ลดลงเพื่อความเสถียร
 
 CIVITAI_TOKEN = os.environ.get("CIVITAI_TOKEN")
 
@@ -83,7 +83,7 @@ async def download_with_aria2c(url, dest_dir):
             print(f"[INFO] Using aiohttp for Civitai URL: {url}")
             return await download_with_aiohttp(url, dest)
 
-        # Use aria2c for other URLs
+        # Use aria2c for other URLs - NO TIMEOUT
         proc = await asyncio.create_subprocess_exec(
             "aria2c", "-c", "-x", "4", "-s", "4", url, "-d", str(dest_dir), "-o", filename,
             "--dir", str(dest_dir),
@@ -105,7 +105,7 @@ async def download_with_aria2c(url, dest_dir):
         return await download_with_aiohttp(url, dest_dir)
 
 async def download_with_aiohttp(url, dest_dir, category=None):
-    """Download using aiohttp for better performance"""
+    """Download using aiohttp for better performance - NO TIMEOUT"""
     try:
         print(f"[MODEL] (aiohttp) Downloading: {url}")
         connector = aiohttp.TCPConnector(limit=64, limit_per_host=8, enable_cleanup_closed=True)
@@ -115,7 +115,8 @@ async def download_with_aiohttp(url, dest_dir, category=None):
         if "civitai.com" in url and CIVITAI_TOKEN:
             headers["Authorization"] = f"Bearer {CIVITAI_TOKEN}"
 
-        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+        # NO TIMEOUT - Let it run as long as needed
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.get(url, headers=headers) as response:
                 if response.status == 200:
                     # Get filename from Content-Disposition
@@ -140,14 +141,22 @@ async def download_with_aiohttp(url, dest_dir, category=None):
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     temp_dest = dest.with_suffix(dest.suffix + '.tmp')
                     
+                    # Download with progress indication but no timeout
+                    downloaded = 0
+                    chunk_size = 16384
                     async with aiofiles.open(temp_dest, 'wb') as f:
-                        async for chunk in response.content.iter_chunked(16384):
+                        async for chunk in response.content.iter_chunked(chunk_size):
                             await f.write(chunk)
+                            downloaded += len(chunk)
+                            # Progress indication every 10MB
+                            if downloaded % (10 * 1024 * 1024) == 0:
+                                print(f"[MODEL] Downloaded {downloaded // 1024 // 1024}MB for {filename}")
                     
                     # Verify file size and move to final location
                     if temp_dest.exists() and temp_dest.stat().st_size > 0:
                         temp_dest.rename(dest)
-                        print(f"[MODEL] Downloaded: {dest}")
+                        final_size = dest.stat().st_size // 1024 // 1024
+                        print(f"[MODEL] Downloaded: {dest} ({final_size}MB)")
                         return True
                     else:
                         print(f"[ERROR] Downloaded file is empty or missing: {temp_dest}")
@@ -162,7 +171,7 @@ async def download_with_aiohttp(url, dest_dir, category=None):
         return False
 
 async def download_models_parallel(config, base_dir):
-    """Download models in parallel with improved efficiency"""
+    """Download models in parallel with improved efficiency - NO TIMEOUT"""
     aria2c_available = check_aria2c()
     download_tasks = []
     
@@ -198,8 +207,10 @@ async def download_models_parallel(config, base_dir):
         async with semaphore:
             return await task
     
-    # Run parallel downloads
+    # Run parallel downloads - NO OVERALL TIMEOUT
     print(f"[DOWNLOAD] Starting parallel download of {len(download_tasks)} models...")
+    print(f"[INFO] No timeout set - downloads will complete regardless of time")
+    
     results = await asyncio.gather(*[download_with_semaphore(task) for task in download_tasks], return_exceptions=True)
     
     # Count successful downloads

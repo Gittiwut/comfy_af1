@@ -1,20 +1,22 @@
-# Latest ML Stack for H100
-torch==2.5.0+cu121
-torchvision==0.20.0+cu121
-torchaudio==2.5.0+cu121
+# constraints_hopper.txt - H100 (Hopper) Optimized
+# Tested combinations for compute capability 9.0
+
+# Latest stable ML Stack for H100
+torch==2.5.1+cu121
+torchvision==0.20.1+cu121
+torchaudio==2.5.1+cu121
 
 # H100-optimized libraries
-xformers==0.0.28.post1
+xformers==0.0.28.post2
 triton==2.5.0
 
 # Enhanced CUDA support for Hopper
 nvidia-ml-py>=12.560.30
-cupy-cuda12x>=13.2.0
 
 # Multi-GPU/NCCL optimizations
 nvidia-nccl-cu12>=2.20.5
 
-# ComfyUI dependencies (same versions for consistency)
+# ComfyUI dependencies (latest stable)
 einops>=0.8.0
 tqdm>=4.66.0
 Pillow>=10.1.0
@@ -24,9 +26,20 @@ diffusers>=0.25.0
 accelerate>=0.25.0
 safetensors>=0.4.1
 
+# Additional ComfyUI requirements
+huggingface_hub>=0.20.0
+segment_anything>=1.0
+facexlib>=0.3.0
+insightface>=0.7.3
+ftfy>=6.1.1
+timm>=0.9.12
+onnxruntime-gpu>=1.16.0
+piexif>=1.1.3
+
 # Performance libraries for H100
 opencv-python>=4.9.0
 imageio>=2.33.0
 psutil>=5.9.6
 requests>=2.31.0
+aiohttp>=3.9.0
 flash-attn>=2.5.0

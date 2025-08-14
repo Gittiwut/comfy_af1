@@ -7,8 +7,8 @@ import os
 import shutil
 
 # เพิ่ม concurrency limit เพื่อไม่ให้ใช้ resources มากเกินไป
-MAX_CONCURRENT_CLONES = 8
-MAX_CONCURRENT_INSTALLS = 4
+MAX_CONCURRENT_CLONES = 6  # ลดลงเพื่อความเสถียร
+MAX_CONCURRENT_INSTALLS = 3  # ลดลงเพื่อป้องกัน timeout
 
 async def clone_repo(name, repo, base_dir, max_retries=3):
     dest = base_dir / name
@@ -23,6 +23,7 @@ async def clone_repo(name, repo, base_dir, max_retries=3):
                 "git", "clone", "--depth=1", "--single-branch", repo, str(dest),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
+            # NO TIMEOUT - Let git clone complete regardless of time
             stdout, stderr = await proc.communicate()
             end = datetime.datetime.now()
             print(f"[CLONE] {name} attempt {attempt} took {(end-start).total_seconds():.1f}s")
@@ -38,57 +39,64 @@ async def clone_repo(name, repo, base_dir, max_retries=3):
             print(f"[CLONE] Exception for {name} (attempt {attempt}): {e}")
             if dest.exists():
                 shutil.rmtree(dest, ignore_errors=True)
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)  # เพิ่ม delay
     return False
 
-async def install_requirements_single(req_path, max_retries=2):
-    """Install single requirements file"""
+async def install_requirements_single(req_path, venv_path, max_retries=2):
+    """Install single requirements file with proper venv path"""
     for attempt in range(1, max_retries + 1):
         try:
             print(f"[REQ] Installing {req_path} (attempt {attempt})")
             start = datetime.datetime.now()
-            print(f"[DEBUG] Starting installation at {start}")
-            print(f"[DEBUG] File size: {req_path.stat().st_size} bytes")
-            print(f"[DEBUG] Installing requirements from: {req_path}")
-            # เพิ่ม Network Check
-            import socket
-            try:
-                socket.create_connection(("8.8.8.8", 53), timeout=3)
-                print(f"[DEBUG] Network connectivity: OK")
-            except Exception as e:
-                print(f"[DEBUG] Network connectivity: SLOW ({e})")
+            
+            # ตรวจสอบขนาดไฟล์
+            if req_path.stat().st_size == 0:
+                print(f"[SKIP] Empty requirements file: {req_path}")
+                return True
+            
+            # Use correct Python executable
+            pybin = venv_path / "bin" / "python"
+            pipbin = venv_path / "bin" / "pip"
+            
+            if not pybin.exists():
+                print(f"[ERROR] Python not found: {pybin}")
+                return False
 
-            # Run install without a hard timeout to avoid aborting long installs
-            # Use constraints to prevent torch/xformers from being changed by custom node requirements
+            # Create constraints to prevent torch overrides
             constraints_path = "/tmp/constraints_custom_nodes.txt"
             try:
-                torch_ver = os.environ.get("TORCH_VER", "2.8.0")
-                cu_tag = os.environ.get("CU_TAG", "cpu")
-                with open(constraints_path, "w") as cf:
-                    cf.write(f"torch=={torch_ver}+{cu_tag}\n")
-                    # torchvision is often pulled transitively
-                    # NOTE: TVISION_VER is not exported here; rely on torch pin; torchvision resolves accordingly
-                extra_index = []
-                if cu_tag != "cpu":
-                    extra_index = ["--extra-index-url", f"https://download.pytorch.org/whl/{cu_tag}"]
-            except Exception:
+                # Get current torch version to prevent downgrades
+                proc = await asyncio.create_subprocess_exec(
+                    str(pybin), "-c", "import torch; print(torch.__version__)",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await proc.communicate()
+                if proc.returncode == 0:
+                    torch_ver = stdout.decode().strip()
+                    with open(constraints_path, "w") as cf:
+                        cf.write(f"torch=={torch_ver}\n")
+                        cf.write(f"torchvision\n")  # Allow torchvision to float
+                        cf.write(f"torchaudio\n")   # Allow torchaudio to float
+                else:
+                    constraints_path = None
+            except Exception as e:
+                print(f"[DEBUG] Could not get torch version: {e}")
                 constraints_path = None
-                extra_index = []
 
-            args = [
-                "uv", "pip", "install",
-                "--python=/mnt/netdrive/python_env/bin/python",
-                "--no-cache",
-            ]
-            if constraints_path:
-                args += ["--constraint", constraints_path]
-            args += extra_index + ["-r", str(req_path)]
+            # Prepare install command
+            args = [str(pipbin), "install", "--no-cache-dir"]
+            if constraints_path and os.path.exists(constraints_path):
+                args.extend(["--constraint", constraints_path])
+            args.extend(["-r", str(req_path)])
 
+            # Run installation - NO TIMEOUT for slow internet
             proc = await asyncio.create_subprocess_exec(
                 *args,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                stdout=asyncio.subprocess.PIPE, 
+                stderr=asyncio.subprocess.PIPE
             )
             
+            # NO TIMEOUT - Let pip install complete regardless of time
             stdout, stderr = await proc.communicate()
             end = datetime.datetime.now()
             print(f"[DEBUG] Installation completed at {end} (took {(end-start).total_seconds():.1f}s)")
@@ -97,28 +105,32 @@ async def install_requirements_single(req_path, max_retries=2):
                 print(f"[REQ] Success: {req_path}")
                 return True
             else:
-                print(f"[REQ] Failed: {req_path} (attempt {attempt})\n{stderr.decode()}")
-        except asyncio.TimeoutError:
-            print(f"[REQ] Timeout for {req_path} (attempt {attempt})")
+                print(f"[REQ] Failed: {req_path} (attempt {attempt})")
+                print(f"[ERROR] {stderr.decode()}")
+                
         except Exception as e:
             print(f"[REQ] Exception for {req_path} (attempt {attempt}): {e}")
-        await asyncio.sleep(2)
+        
+        await asyncio.sleep(5)  # เพิ่ม delay
     return False
 
-async def install_requirements_parallel(base_dir):
+async def install_requirements_parallel(base_dir, venv_path):
     """Install requirements files in parallel with concurrency limit"""
     reqs = list(base_dir.glob("*/requirements.txt"))
-    reqs = [r for r in reqs if r.stat().st_size > 0]  # <== ข้ามไฟล์ว่าง
+    reqs = [r for r in reqs if r.exists() and r.stat().st_size > 0]  # ข้ามไฟล์ว่าง
+    
     if not reqs:
         print("[REQ] No requirements.txt files found")
         return
+    
+    print(f"[REQ] Found {len(reqs)} requirements files to install")
     
     # ใช้ semaphore เพื่อจำกัด concurrency
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_INSTALLS)
     
     async def install_with_semaphore(req):
         async with semaphore:
-            return await install_requirements_single(req)
+            return await install_requirements_single(req, venv_path)
     
     # รัน parallel installation
     tasks = [install_with_semaphore(req) for req in reqs]
@@ -130,8 +142,18 @@ async def install_requirements_parallel(base_dir):
 async def main():
     base_dir = Path("/mnt/netdrive/comfyui/custom_nodes")
     base_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Get venv path from environment variable set by entrypoint
+    venv_path = Path(os.environ.get("VENV_PATH", "/mnt/netdrive/python_envs/unknown"))
+    if not venv_path.exists():
+        print(f"[ERROR] Virtual environment not found: {venv_path}")
+        return
+    
+    print(f"[INFO] Using virtual environment: {venv_path}")
+    
     with open("/custom_nodes_list.json") as f:
         nodes = json.load(f)
+    
     # สร้าง clone tasks
     clone_tasks = []
     for name, repos in nodes.items():
@@ -139,27 +161,27 @@ async def main():
             dest = base_dir / name
             if not dest.exists():
                 clone_tasks.append(clone_repo(name, repo, base_dir))
+    
     if not clone_tasks:
-        print("[SETUP] All custom nodes already exist. Exiting.")
-        return
-    
-    # ใช้ semaphore เพื่อจำกัด concurrency
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_CLONES)
-    
-    async def clone_with_semaphore(task):
-        async with semaphore:
-            return await task
-    
-    # รัน parallel cloning
-    print(f"[SETUP] Starting parallel clone of {len(clone_tasks)} repositories...")
-    clone_results = await asyncio.gather(*[clone_with_semaphore(task) for task in clone_tasks], return_exceptions=True)
-    
-    success_count = sum(1 for r in clone_results if r is True)
-    print(f"[SETUP] Clone completed: {success_count}/{len(clone_tasks)} successful")
+        print("[SETUP] All custom nodes already exist. Proceeding to requirements installation.")
+    else:
+        # ใช้ semaphore เพื่อจำกัด concurrency
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_CLONES)
+        
+        async def clone_with_semaphore(task):
+            async with semaphore:
+                return await task
+        
+        # รัน parallel cloning
+        print(f"[SETUP] Starting parallel clone of {len(clone_tasks)} repositories...")
+        clone_results = await asyncio.gather(*[clone_with_semaphore(task) for task in clone_tasks], return_exceptions=True)
+        
+        success_count = sum(1 for r in clone_results if r is True)
+        print(f"[SETUP] Clone completed: {success_count}/{len(clone_tasks)} successful")
     
     # รัน parallel requirements installation
     print("[SETUP] Starting parallel requirements installation...")
-    await install_requirements_parallel(base_dir)
+    await install_requirements_parallel(base_dir, venv_path)
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())

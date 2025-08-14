@@ -1,3 +1,6 @@
+# constraints_blackwell.txt - RTX 5090/B200 (Blackwell) Optimized
+# Bleeding edge for compute capability 10.0+ with PTX fallback
+
 # Latest PyTorch with Blackwell support
 torch==2.6.0.dev20250101+cu124
 torchvision==0.21.0.dev20250101+cu124
