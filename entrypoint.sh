@@ -76,13 +76,20 @@ TORCH_CUDA_ARCH_LIST=""
 
 echo "🔍 [ARCH] Detecting GPU architecture..."
 
-if (( GPU_CC_NUM >= 100 )); then
-    # Blackwell (RTX 5090, B200) - CC 10.0+
+if (( GPU_CC_NUM >= 120 )); then
+    # Blackwell RTX 5090/6090 - CC 12.0+
     ARCH_TAG="blackwell"
-    CU_TAG="cu124"
+    CU_TAG="cu128"
+    CONSTRAINTS_FILE="constraints_blackwell.txt"
+    TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0;12.0;12.0+PTX"
+    echo "⚡ [ARCH] Blackwell Consumer detected (RTX 5090+ class)"
+elif (( GPU_CC_NUM >= 100 )); then
+    # Blackwell B100/B200 enterprise - CC 10.0+
+    ARCH_TAG="blackwell"
+    CU_TAG="cu128"
     CONSTRAINTS_FILE="constraints_blackwell.txt"
     TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0;10.0+PTX"
-    echo "⚡ [ARCH] Blackwell detected (RTX 5090/B200 class)"
+    echo "🏢 [ARCH] Blackwell Enterprise detected (B100/B200 class)"
 elif (( GPU_CC_NUM >= 90 )); then
     # Hopper (H100) - CC 9.0
     ARCH_TAG="hopper"
@@ -190,18 +197,37 @@ echo "📋 [DEPS] Using constraints: $CONSTRAINTS_FILE"
 PACKAGES_INSTALLED=false
 TORCH_LOCK_FILE="/mnt/netdrive/.torch_install_lock_${ARCH_TAG}"
 
-# Quick PyTorch version check
 if "$PYBIN" -c "import torch" &>/dev/null; then
   CURRENT_TORCH=$("$PYBIN" -c "import torch; print(torch.__version__)" 2>/dev/null || echo "")
   EXPECTED_TORCH=$(grep "^torch==" "$CONSTRAINTS_PATH" | cut -d'=' -f3 | cut -d'+' -f1 || echo "")
   
-  if [[ "$CURRENT_TORCH" =~ $EXPECTED_TORCH ]]; then
-    echo "✅ [TORCH] Already installed: $CURRENT_TORCH"
+  # แยก version number โดยไม่รวม build suffix
+  CURRENT_VERSION=$(echo "$CURRENT_TORCH" | cut -d'+' -f1 | cut -d'.' -f1-3)
+  EXPECTED_VERSION=$(echo "$EXPECTED_TORCH" | cut -d'.' -f1-3)
+  
+  # ตรวจสอบ major.minor version แทน exact match
+  CURRENT_MAJOR_MINOR=$(echo "$CURRENT_VERSION" | cut -d'.' -f1-2)
+  EXPECTED_MAJOR_MINOR=$(echo "$EXPECTED_VERSION" | cut -d'.' -f1-2)
+  
+  echo "🔍 [TORCH] Current: $CURRENT_TORCH, Expected: $EXPECTED_TORCH"
+  echo "🔍 [TORCH] Comparing versions: $CURRENT_MAJOR_MINOR vs $EXPECTED_MAJOR_MINOR"
+  
+  # ใช้ version comparison ที่ยืดหยุ่นกว่า
+  if [[ "$CURRENT_MAJOR_MINOR" == "$EXPECTED_MAJOR_MINOR" ]] || [[ "$CURRENT_TORCH" == *"$EXPECTED_VERSION"* ]]; then
+    echo "✅ [TORCH] Compatible version installed: $CURRENT_TORCH"
     PACKAGES_INSTALLED=true
   else
-    echo "🔄 [TORCH] Version mismatch: found $CURRENT_TORCH, constraints specify $EXPECTED_TORCH"
-    echo "🧹 [TORCH] Cleaning up for reinstallation..."
-    "$PIPBIN" uninstall -y torch torchvision torchaudio xformers triton &>/dev/null || true
+    # เพิ่มการตรวจสอบ lock file เพื่อป้องกัน infinite loop
+    TORCH_REINSTALL_FLAG="/mnt/netdrive/.torch_reinstall_${ARCH_TAG}_$(date +%Y%m%d)"
+    if [[ -f "$TORCH_REINSTALL_FLAG" ]]; then
+      echo "⚠️  [TORCH] Already attempted reinstall today, skipping to prevent loop"
+      PACKAGES_INSTALLED=true
+    else
+      echo "🔄 [TORCH] Version mismatch: found $CURRENT_TORCH, expected compatible with $EXPECTED_TORCH"
+      echo "🧹 [TORCH] Cleaning up for reinstallation..."
+      touch "$TORCH_REINSTALL_FLAG"
+      "$PIPBIN" uninstall -y torch torchvision torchaudio xformers triton &>/dev/null || true
+    fi
   fi
 else
   echo "📦 [TORCH] Not installed or import failed"
