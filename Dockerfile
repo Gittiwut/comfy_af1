@@ -5,6 +5,14 @@ FROM nvidia/cuda:12.8.1-runtime-ubuntu22.04
 ARG PYTHON_VERSION=3.11
 ARG TARGETARCH=amd64
 
+# For Blackwell support
+ENV TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0;12.0;12.0+PTX" \
+    XFORMERS_BUILD_WITH_CUDA="1" \
+    FORCE_CUDA="1" \
+    CUDA_MODULE_LOADING="LAZY" \
+    PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128" \
+    MAX_JOBS="4"
+
 # Universal environment variables - minimal but effective
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \

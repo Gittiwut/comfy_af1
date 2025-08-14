@@ -76,20 +76,32 @@ TORCH_CUDA_ARCH_LIST=""
 
 echo "🔍 [ARCH] Detecting GPU architecture..."
 
+# Enhanced GPU Detection with Blackwell-specific fixes
 if (( GPU_CC_NUM >= 120 )); then
     # Blackwell RTX 5090/6090 - CC 12.0+
     ARCH_TAG="blackwell"
     CU_TAG="cu128"
     CONSTRAINTS_FILE="constraints_blackwell.txt"
     TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0;12.0;12.0+PTX"
+    # CRITICAL: Set Blackwell-specific build flags
+    export TORCH_CUDA_ARCH_LIST="10.0;12.0"
+    export XFORMERS_BUILD_WITH_CUDA="1"
+    export FORCE_CUDA="1"
+    export CUDA_VISIBLE_DEVICES="0"
     echo "⚡ [ARCH] Blackwell Consumer detected (RTX 5090+ class)"
+    echo "🔧 [ARCH] Setting TORCH_CUDA_ARCH_LIST=10.0;12.0 for xFormers compatibility"
 elif (( GPU_CC_NUM >= 100 )); then
     # Blackwell B100/B200 enterprise - CC 10.0+
     ARCH_TAG="blackwell"
     CU_TAG="cu128"
     CONSTRAINTS_FILE="constraints_blackwell.txt"
     TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0;10.0+PTX"
+    # Enterprise Blackwell build flags
+    export TORCH_CUDA_ARCH_LIST="10.0"
+    export XFORMERS_BUILD_WITH_CUDA="1"
+    export FORCE_CUDA="1"
     echo "🏢 [ARCH] Blackwell Enterprise detected (B100/B200 class)"
+    echo "🔧 [ARCH] Setting TORCH_CUDA_ARCH_LIST=10.0 for enterprise compatibility"
 elif (( GPU_CC_NUM >= 90 )); then
     # Hopper (H100) - CC 9.0
     ARCH_TAG="hopper"
@@ -115,6 +127,106 @@ else
     echo "[ERROR] Unsupported GPU architecture (CC: $GPU_CC_RAW)"
     echo "[INFO] Minimum requirement: Compute Capability 8.6+"
     exit 1
+fi
+
+# xFormers Installation Strategy for Blackwell
+install_xformers_blackwell() {
+    echo "🔧 [XFORMERS] Installing Blackwell-compatible xFormers..."
+    
+    # Check if xFormers with Blackwell support already exists
+    if "$PYBIN" -c "import xformers; print('xFormers version:', xformers.__version__)" &>/dev/null; then
+        echo "🔍 [XFORMERS] Found existing xFormers installation, testing Blackwell compatibility..."
+        
+        # Test if it works with Blackwell
+        if "$PYBIN" -c "
+import xformers.ops
+import torch
+if torch.cuda.is_available():
+    # Quick test for Blackwell compatibility
+    try:
+        q = torch.randn(1, 8, 64, device='cuda', dtype=torch.float16)
+        k = torch.randn(1, 8, 64, device='cuda', dtype=torch.float16) 
+        v = torch.randn(1, 8, 64, device='cuda', dtype=torch.float16)
+        output = xformers.ops.memory_efficient_attention(q, k, v)
+        print('Blackwell xFormers test: PASS')
+    except Exception as e:
+        print(f'Blackwell xFormers test: FAIL - {e}')
+        exit(1)
+else:
+    print('CUDA not available for xFormers test')
+" 2>/dev/null; then
+            echo "✅ [XFORMERS] Blackwell compatibility test passed"
+            return 0
+        else
+            echo "❌ [XFORMERS] Pre-compiled version failed Blackwell test, trying source build"
+        fi
+    fi
+    
+    # Fallback: Build from source with Blackwell support
+    echo "🔨 [XFORMERS] Building xFormers from source with Blackwell support..."
+    
+    # Install build dependencies
+    "$PIPBIN" install --no-cache-dir ninja packaging wheel
+    
+    # Clone and build xFormers with Blackwell support
+    XFORMERS_BUILD_DIR="/tmp/xformers_blackwell_build"
+    rm -rf "$XFORMERS_BUILD_DIR"
+    
+    if git clone --depth=1 --branch main https://github.com/facebookresearch/xformers.git "$XFORMERS_BUILD_DIR" &>/dev/null; then
+        cd "$XFORMERS_BUILD_DIR"
+        git submodule update --init --recursive &>/dev/null
+        
+        # Set Blackwell-specific build environment
+        export TORCH_CUDA_ARCH_LIST="10.0;12.0"
+        export XFORMERS_BUILD_WITH_CUDA="1"
+        export FORCE_CUDA="1"
+        export MAX_JOBS="4"  # Limit parallel jobs to prevent OOM
+        
+        echo "🔧 [XFORMERS] Building with TORCH_CUDA_ARCH_LIST=10.0;12.0..."
+        
+        if "$PIPBIN" install --no-cache-dir -v -e . 2>&1 | tee /tmp/xformers_build.log; then
+            echo "✅ [XFORMERS] Source build completed successfully"
+            
+            # Test the built version
+            if "$PYBIN" -c "
+import xformers.ops
+import torch
+if torch.cuda.is_available():
+    q = torch.randn(1, 8, 64, device='cuda', dtype=torch.float16)
+    k = torch.randn(1, 8, 64, device='cuda', dtype=torch.float16)
+    v = torch.randn(1, 8, 64, device='cuda', dtype=torch.float16)
+    output = xformers.ops.memory_efficient_attention(q, k, v)
+    print('Source-built xFormers test: PASS')
+else:
+    print('CUDA not available for xFormers test')
+" 2>/dev/null; then
+                echo "✅ [XFORMERS] Source-built version passed Blackwell test"
+                cd - &>/dev/null
+                rm -rf "$XFORMERS_BUILD_DIR"
+                return 0
+            else
+                echo "❌ [XFORMERS] Source-built version failed test"
+            fi
+        else
+            echo "❌ [XFORMERS] Source build failed, check /tmp/xformers_build.log"
+        fi
+        
+        cd - &>/dev/null
+        rm -rf "$XFORMERS_BUILD_DIR"
+    else
+        echo "❌ [XFORMERS] Failed to clone xFormers repository"
+    fi
+    
+    # Final fallback: Skip xFormers but continue
+    echo "⚠️  [XFORMERS] xFormers installation failed, continuing without it"
+    echo "💡 [XFORMERS] ComfyUI will use PyTorch attention fallback"
+    export XFORMERS_DISABLED="1"
+    return 1
+}
+
+# In the main installation section, for Blackwell:
+if [[ "$ARCH_TAG" == "blackwell" ]] && [[ "$SKIP_XFORMERS" != "1" ]]; then
+    install_xformers_blackwell
 fi
 
 # Set architecture-specific environment variables

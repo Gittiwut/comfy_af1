@@ -18,3 +18,4 @@ ftfy
 timm
 diffusers
 aiohttp
+aiofiles
