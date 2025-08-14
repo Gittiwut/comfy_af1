@@ -17,3 +17,4 @@ insightface
 ftfy
 timm
 diffusers
+aiohttp

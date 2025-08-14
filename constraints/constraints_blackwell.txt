@@ -1,0 +1,36 @@
+# Latest PyTorch with Blackwell support
+torch==2.6.0.dev20250101+cu124
+torchvision==0.21.0.dev20250101+cu124
+torchaudio==2.6.0.dev20250101+cu124
+
+# Cutting-edge optimizations
+xformers==0.0.29.dev240101
+triton==3.0.0.dev20250101
+
+# Latest CUDA support
+nvidia-ml-py>=12.580.1
+cupy-cuda12x>=13.3.0
+
+# Advanced multi-GPU for Blackwell
+nvidia-nccl-cu12>=2.21.5
+
+# Future-proof ComfyUI stack
+einops>=0.8.0
+tqdm>=4.66.2
+Pillow>=10.2.0
+scipy>=1.12.0
+transformers>=4.37.0
+diffusers>=0.26.0
+accelerate>=0.26.0
+safetensors>=0.4.2
+
+# Blackwell-optimized performance
+opencv-python>=4.9.0
+imageio>=2.34.0
+psutil>=5.9.8
+requests>=2.31.0
+flash-attn>=2.6.0
+
+# Experimental/bleeding edge (may require nightly builds)
+# torch-audio-models>=0.5.0
+# nvidia-apex>=0.1
