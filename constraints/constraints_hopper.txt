@@ -1,6 +1,9 @@
 # constraints_hopper.txt - H100 (Hopper) Optimized
 # Tested combinations for compute capability 9.0
 
+# CRITICAL: NumPy must be installed FIRST before PyTorch
+numpy>=1.24.0
+
 # Latest stable ML Stack for H100
 torch==2.5.1+cu121
 torchvision==0.20.1+cu121

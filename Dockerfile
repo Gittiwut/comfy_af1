@@ -1,6 +1,6 @@
 # Multi-GPU Universal ComfyUI Image
 # Supports: RTX 4090 (Ada) → RTX 5090 (Blackwell) → H100 (Hopper) → B200 (Blackwell)
-FROM nvidia/cuda:12.8.1-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
 
 ARG PYTHON_VERSION=3.11
 ARG TARGETARCH=amd64

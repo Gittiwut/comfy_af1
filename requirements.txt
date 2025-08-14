@@ -1,9 +1,9 @@
+numpy
 pillow
 einops
 safetensors
 huggingface_hub
 transformers
-numpy
 requests
 psutil
 scipy

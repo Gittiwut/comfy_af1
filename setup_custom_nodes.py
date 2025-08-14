@@ -54,7 +54,7 @@ async def install_requirements_single(req_path, venv_path, max_retries=2):
                 print(f"[SKIP] Empty requirements file: {req_path}")
                 return True
             
-            # Use correct Python executable
+            # Use correct Python executable from network volume venv
             pybin = venv_path / "bin" / "python"
             pipbin = venv_path / "bin" / "pip"
             
@@ -62,8 +62,11 @@ async def install_requirements_single(req_path, venv_path, max_retries=2):
                 print(f"[ERROR] Python not found: {pybin}")
                 return False
 
+            # Use UV if available for faster installation
+            uv_available = shutil.which("uv") is not None
+            
             # Create constraints to prevent torch overrides
-            constraints_path = "/tmp/constraints_custom_nodes.txt"
+            constraints_path = "/mnt/netdrive/tmp/constraints_custom_nodes.txt"
             try:
                 # Get current torch version to prevent downgrades
                 proc = await asyncio.create_subprocess_exec(
@@ -83,20 +86,29 @@ async def install_requirements_single(req_path, venv_path, max_retries=2):
                 print(f"[DEBUG] Could not get torch version: {e}")
                 constraints_path = None
 
-            # Prepare install command
-            args = [str(pipbin), "install", "--no-cache-dir"]
-            if constraints_path and os.path.exists(constraints_path):
-                args.extend(["--constraint", constraints_path])
-            args.extend(["-r", str(req_path)])
+            # Prepare install command - prioritize UV
+            if uv_available:
+                args = ["uv", "pip", "install", "--python", str(pybin)]
+                if constraints_path and os.path.exists(constraints_path):
+                    args.extend(["--constraint", constraints_path])
+                args.extend(["-r", str(req_path)])
+                print(f"[REQ] Using UV for faster installation")
+            else:
+                args = [str(pipbin), "install", "--no-cache-dir"]
+                if constraints_path and os.path.exists(constraints_path):
+                    args.extend(["--constraint", constraints_path])
+                args.extend(["-r", str(req_path)])
+                print(f"[REQ] Using pip fallback")
 
             # Run installation - NO TIMEOUT for slow internet
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 stdout=asyncio.subprocess.PIPE, 
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, "PIP_CACHE_DIR": "/mnt/netdrive/pip_cache"}
             )
             
-            # NO TIMEOUT - Let pip install complete regardless of time
+            # NO TIMEOUT - Let installation complete regardless of time
             stdout, stderr = await proc.communicate()
             end = datetime.datetime.now()
             print(f"[DEBUG] Installation completed at {end} (took {(end-start).total_seconds():.1f}s)")

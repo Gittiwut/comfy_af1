@@ -1,6 +1,9 @@
 # constraints_ada.txt - RTX 4090 (Ada Lovelace) Optimized
 # Tested combinations for compute capability 8.9
 
+# CRITICAL: NumPy must be installed FIRST before PyTorch
+numpy>=1.24.0
+
 # constraints_ada.txt - RTX 4090 (Ada Lovelace) Optimized
 # Tested combinations for compute capability 8.9
 

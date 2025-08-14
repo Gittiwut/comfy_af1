@@ -27,6 +27,15 @@ export PYTHONDONTWRITEBYTECODE=1
 export CUDA_MODULE_LOADING=LAZY
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128"
 
+# CUDA development environment
+export CUDA_HOME="/usr/local/cuda"
+export PATH="${CUDA_HOME}/bin:${PATH}"
+export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}"
+
+# UV cache directory
+export UV_CACHE_DIR="/mnt/netdrive/uv_cache"
+mkdir -p "$UV_CACHE_DIR"
+
 # Mount verification
 if ! grep -qs " /mnt/netdrive " /proc/mounts; then
   echo "[ERROR] /mnt/netdrive not mounted"
@@ -133,6 +142,14 @@ fi
 install_xformers_blackwell() {
     echo "🔧 [XFORMERS] Installing Blackwell-compatible xFormers..."
     
+    # Check if CUDA development tools are available
+    if ! command -v nvcc &> /dev/null; then
+        echo "⚠️  [XFORMERS] CUDA compiler (nvcc) not found - skipping source build"
+        echo "💡 [XFORMERS] ComfyUI will use PyTorch attention fallback"
+        export XFORMERS_DISABLED="1"
+        return 1
+    fi
+    
     # Check if xFormers with Blackwell support already exists
     if "$PYBIN" -c "import xformers; print('xFormers version:', xformers.__version__)" &>/dev/null; then
         echo "🔍 [XFORMERS] Found existing xFormers installation, testing Blackwell compatibility..."
@@ -162,29 +179,38 @@ else:
         fi
     fi
     
+    # Try pre-compiled wheel first with broader compatibility
+    echo "📦 [XFORMERS] Attempting pre-compiled installation with fallback..."
+    if "$PIPBIN" install --no-cache-dir --pre xformers --index-url https://download.pytorch.org/whl/nightly/cu121 2>/dev/null; then
+        echo "✅ [XFORMERS] Pre-compiled installation successful"
+        return 0
+    fi
+    
     # Fallback: Build from source with Blackwell support
     echo "🔨 [XFORMERS] Building xFormers from source with Blackwell support..."
     
     # Install build dependencies
     "$PIPBIN" install --no-cache-dir ninja packaging wheel
     
-    # Clone and build xFormers with Blackwell support
-    XFORMERS_BUILD_DIR="/tmp/xformers_blackwell_build"
+    # Set Blackwell-specific build environment
+    export TORCH_CUDA_ARCH_LIST="10.0;12.0"
+    export XFORMERS_BUILD_WITH_CUDA="1"
+    export FORCE_CUDA="1"
+    export MAX_JOBS="2"  # Reduce parallel jobs further
+    export CUDA_HOME="/usr/local/cuda"
+    
+    # Clone and build xFormers with Blackwell support in network volume
+    XFORMERS_BUILD_DIR="/mnt/netdrive/tmp/xformers_blackwell_build"
     rm -rf "$XFORMERS_BUILD_DIR"
+    mkdir -p "$XFORMERS_BUILD_DIR"
     
     if git clone --depth=1 --branch main https://github.com/facebookresearch/xformers.git "$XFORMERS_BUILD_DIR" &>/dev/null; then
         cd "$XFORMERS_BUILD_DIR"
         git submodule update --init --recursive &>/dev/null
         
-        # Set Blackwell-specific build environment
-        export TORCH_CUDA_ARCH_LIST="10.0;12.0"
-        export XFORMERS_BUILD_WITH_CUDA="1"
-        export FORCE_CUDA="1"
-        export MAX_JOBS="4"  # Limit parallel jobs to prevent OOM
-        
         echo "🔧 [XFORMERS] Building with TORCH_CUDA_ARCH_LIST=10.0;12.0..."
         
-        if "$PIPBIN" install --no-cache-dir -v -e . 2>&1 | tee /tmp/xformers_build.log; then
+        if "$PIPBIN" install --no-cache-dir -v -e . 2>&1 | tee /mnt/netdrive/xformers_build.log; then
             echo "✅ [XFORMERS] Source build completed successfully"
             
             # Test the built version
@@ -208,7 +234,7 @@ else:
                 echo "❌ [XFORMERS] Source-built version failed test"
             fi
         else
-            echo "❌ [XFORMERS] Source build failed, check /tmp/xformers_build.log"
+            echo "❌ [XFORMERS] Source build failed, check /mnt/netdrive/xformers_build.log"
         fi
         
         cd - &>/dev/null
@@ -284,7 +310,30 @@ echo "✅ [VENV] Active Python: $("$PYBIN" -c "import sys; print(sys.executable)
 echo "✅ [VENV] Python version: $("$PYBIN" --version)"
 
 # Configure pip
+mkdir -p "$PIP_CACHE_DIR"
 "$PIPBIN" config set global.cache-dir "$PIP_CACHE_DIR" 2>/dev/null || true
+"$PIPBIN" config set global.timeout 300 2>/dev/null || true
+"$PIPBIN" config set global.retries 3 2>/dev/null || true
+
+# Write pip configuration file to network volume
+mkdir -p /root/.config/pip
+cat > /root/.config/pip/pip.conf << EOF
+[global]
+cache-dir = $PIP_CACHE_DIR
+timeout = 300
+retries = 3
+trusted-host = pypi.org
+               files.pythonhosted.org
+               download.pytorch.org
+
+[install]
+user = false
+break-system-packages = true
+EOF
+
+echo "Writing to /root/.config/pip/pip.conf"
+
+# Update pip, wheel, setuptools in network volume venv
 "$PIPBIN" install --upgrade pip wheel setuptools &>/dev/null
 
 # Enhanced Package Installation with Architecture-Specific Constraints
@@ -359,32 +408,82 @@ if [[ "$PACKAGES_INSTALLED" == "false" ]]; then
     fi
   fi
 
-  echo "📦 [DEPS] Installing packages for $ARCH_TAG architecture..."
+  echo "📦 [DEPS] Installing packages for $ARCH_TAG architecture to network volume..."
   
   # Create lock file
   touch "$TORCH_LOCK_FILE"
   trap 'rm -f "$TORCH_LOCK_FILE"' EXIT INT TERM
   
-  # Install with architecture-specific constraints
-  # First install core requirements, then constraints
-  if "$PIPBIN" install --no-cache-dir -r "/requirements.txt"; then
-    echo "✅ [DEPS] Core requirements installed"
+  # Use UV for faster installation with proper virtual environment targeting
+  if command -v uv &> /dev/null; then
+    echo "🚀 [UV] Using UV for faster package installation"
     
-    # Then install architecture-specific packages
-    if "$PIPBIN" install --no-cache-dir --constraint "$CONSTRAINTS_PATH" \
-      torch torchvision torchaudio xformers triton; then
+    # Install core requirements using UV
+    if uv pip install --python "$PYBIN" --cache-dir "$PIP_CACHE_DIR" -r "/requirements.txt"; then
+      echo "✅ [UV] Core requirements installed"
       
-      echo "✅ [DEPS] Architecture-specific packages installed"
-      rm -f "$TORCH_LOCK_FILE"
+      # Then install architecture-specific packages using UV
+      if uv pip install --python "$PYBIN" --cache-dir "$PIP_CACHE_DIR" --constraint "$CONSTRAINTS_PATH" \
+        torch torchvision torchaudio xformers triton; then
+        
+        echo "✅ [UV] Architecture-specific packages installed"
+        rm -f "$TORCH_LOCK_FILE"
+      else
+        echo "⚠️  [UV] Architecture-specific package installation failed, falling back to pip"
+        # Fallback to regular pip
+        if "$PIPBIN" install --no-cache-dir --constraint "$CONSTRAINTS_PATH" \
+          torch torchvision torchaudio xformers triton; then
+          echo "✅ [PIP] Architecture-specific packages installed via fallback"
+          rm -f "$TORCH_LOCK_FILE"
+        else
+          echo "[ERROR] Both UV and pip package installation failed"
+          rm -f "$TORCH_LOCK_FILE"
+          exit 1
+        fi
+      fi
     else
-      echo "[ERROR] Architecture-specific package installation failed"
+      echo "⚠️  [UV] Core requirements installation failed, falling back to pip"
+      # Fallback to regular pip installation
+      if "$PIPBIN" install --no-cache-dir -r "/requirements.txt"; then
+        echo "✅ [PIP] Core requirements installed via fallback"
+        
+        if "$PIPBIN" install --no-cache-dir --constraint "$CONSTRAINTS_PATH" \
+          torch torchvision torchaudio xformers triton; then
+          
+          echo "✅ [PIP] Architecture-specific packages installed via fallback"
+          rm -f "$TORCH_LOCK_FILE"
+        else
+          echo "[ERROR] Pip package installation failed"
+          rm -f "$TORCH_LOCK_FILE"
+          exit 1
+        fi
+      else
+        echo "[ERROR] Core requirements installation failed"
+        rm -f "$TORCH_LOCK_FILE"
+        exit 1
+      fi
+    fi
+  else
+    # Fallback to regular pip installation if UV not available
+    if "$PIPBIN" install --no-cache-dir -r "/requirements.txt"; then
+      echo "✅ [DEPS] Core requirements installed"
+      
+      # Then install architecture-specific packages
+      if "$PIPBIN" install --no-cache-dir --constraint "$CONSTRAINTS_PATH" \
+        torch torchvision torchaudio xformers triton; then
+        
+        echo "✅ [DEPS] Architecture-specific packages installed"
+        rm -f "$TORCH_LOCK_FILE"
+      else
+        echo "[ERROR] Architecture-specific package installation failed"
+        rm -f "$TORCH_LOCK_FILE"
+        exit 1
+      fi
+    else
+      echo "[ERROR] Core requirements installation failed"
       rm -f "$TORCH_LOCK_FILE"
       exit 1
     fi
-  else
-    echo "[ERROR] Core requirements installation failed"
-    rm -f "$TORCH_LOCK_FILE"
-    exit 1
   fi
 fi
 

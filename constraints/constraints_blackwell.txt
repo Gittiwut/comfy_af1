@@ -1,6 +1,9 @@
 # constraints_blackwell.txt - Updated for RTX 5090 & B100/B200
 # Based on research from xFormers issues #1251, #1285 and Unsloth compatibility
 
+# CRITICAL: NumPy must be installed FIRST before PyTorch
+numpy>=1.24.0
+
 # PyTorch with CUDA 12.8 support (confirmed working)
 torch>=2.8.0
 torchvision>=0.23.0  
