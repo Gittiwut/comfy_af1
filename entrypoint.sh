@@ -230,7 +230,6 @@ if [[ "$ARCH_TAG" == "blackwell" ]] && [[ "$SKIP_XFORMERS" != "1" ]]; then
 fi
 
 # Set architecture-specific environment variables
-export TORCH_CUDA_ARCH_LIST="$TORCH_CUDA_ARCH_LIST"
 export CUDA_ARCH_TAG="$ARCH_TAG"
 
 echo "🏗️  [ARCH] Architecture: $ARCH_TAG"
