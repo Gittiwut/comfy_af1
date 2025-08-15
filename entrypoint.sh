@@ -596,6 +596,10 @@ if [ -f "${COMFYUI_ROOT}/requirements.txt" ]; then
   "$PIPBIN" install --no-cache-dir -r "${COMFYUI_ROOT}/requirements.txt" || true
 fi
 
+# Install additional required packages that may be missing
+echo "📦 [COMFYUI] Installing additional required packages..."
+"$PIPBIN" install --no-cache-dir aiofiles || true
+
 # Jupyter setup
 if [ "$ENABLE_JUPYTER" = "true" ]; then
   echo "📓 [JUPYTER] Setting up on :$JUPYTER_PORT"

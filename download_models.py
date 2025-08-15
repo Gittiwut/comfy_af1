@@ -5,10 +5,19 @@ from pathlib import Path
 import shutil
 import time
 import aiohttp
-import aiofiles
 from urllib.parse import urlparse
 import re
 
+# Fallback import for aiofiles
+try:
+    import aiofiles
+except ImportError:
+    print("[ERROR] aiofiles not found, installing...")
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "aiofiles"])
+    import aiofiles
+    
 # เพิ่ม concurrency limit
 MAX_CONCURRENT_DOWNLOADS = 6  # ลดลงเพื่อความเสถียร
 
