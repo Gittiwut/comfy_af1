@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Universal ComfyUI Entrypoint - Multi-GPU Architecture Support
+# Universal ComfyUI Entrypoint - Multi-GPU Architecture Support (FIXED)
 # Supports: RTX 4090 (Ada) → RTX 5090 (Blackwell) → H100 (Hopper) → B200 (Blackwell)
 set -euo pipefail
 
@@ -82,6 +82,7 @@ ARCH_TAG=""
 CU_TAG=""
 CONSTRAINTS_FILE=""
 TORCH_CUDA_ARCH_LIST=""
+XFORMERS_INDEX_URL=""  # NEW: Dynamic xFormers index URL
 
 echo "🔍 [ARCH] Detecting GPU architecture..."
 
@@ -92,6 +93,7 @@ if (( GPU_CC_NUM >= 120 )); then
     CU_TAG="cu128"
     CONSTRAINTS_FILE="constraints_blackwell.txt"
     TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0;12.0;12.0+PTX"
+    XFORMERS_INDEX_URL="https://download.pytorch.org/whl/nightly/cu128"  # FIX: Use cu128
     # CRITICAL: Set Blackwell-specific build flags
     export TORCH_CUDA_ARCH_LIST="10.0;12.0"
     export XFORMERS_BUILD_WITH_CUDA="1"
@@ -105,6 +107,7 @@ elif (( GPU_CC_NUM >= 100 )); then
     CU_TAG="cu128"
     CONSTRAINTS_FILE="constraints_blackwell.txt"
     TORCH_CUDA_ARCH_LIST="8.9;9.0;10.0;10.0+PTX"
+    XFORMERS_INDEX_URL="https://download.pytorch.org/whl/nightly/cu128"  # FIX: Use cu128
     # Enterprise Blackwell build flags
     export TORCH_CUDA_ARCH_LIST="10.0"
     export XFORMERS_BUILD_WITH_CUDA="1"
@@ -117,6 +120,7 @@ elif (( GPU_CC_NUM >= 90 )); then
     CU_TAG="cu121"
     CONSTRAINTS_FILE="constraints_hopper.txt"
     TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0;9.0+PTX"
+    XFORMERS_INDEX_URL="https://download.pytorch.org/whl/nightly/cu121"
     echo "🏢 [ARCH] Hopper detected (H100 class)"
 elif (( GPU_CC_NUM >= 89 )); then
     # Ada Lovelace (RTX 4090) - CC 8.9
@@ -124,6 +128,7 @@ elif (( GPU_CC_NUM >= 89 )); then
     CU_TAG="cu121"
     CONSTRAINTS_FILE="constraints_ada.txt"
     TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;8.9+PTX"
+    XFORMERS_INDEX_URL="https://download.pytorch.org/whl/nightly/cu121"
     echo "🎮 [ARCH] Ada Lovelace detected (RTX 4090 class)"
 elif (( GPU_CC_NUM >= 86 )); then
     # Ampere (RTX 3090, A100) - CC 8.6
@@ -131,6 +136,7 @@ elif (( GPU_CC_NUM >= 86 )); then
     CU_TAG="cu121"
     CONSTRAINTS_FILE="constraints_ada.txt"
     TORCH_CUDA_ARCH_LIST="8.0;8.6;8.6+PTX"
+    XFORMERS_INDEX_URL="https://download.pytorch.org/whl/nightly/cu121"
     echo "⚡ [ARCH] Ampere detected (RTX 3090/A100 class) - using Ada fallback"
 else
     echo "[ERROR] Unsupported GPU architecture (CC: $GPU_CC_RAW)"
@@ -138,7 +144,7 @@ else
     exit 1
 fi
 
-# xFormers Installation Strategy for Blackwell
+# xFormers Installation Strategy for Blackwell - FIXED VERSION
 install_xformers_blackwell() {
     echo "🔧 [XFORMERS] Installing Blackwell-compatible xFormers..."
     
@@ -179,10 +185,21 @@ else:
         fi
     fi
     
-    # Try pre-compiled wheel first with broader compatibility
-    echo "📦 [XFORMERS] Attempting pre-compiled installation with fallback..."
-    if "$PIPBIN" install --no-cache-dir --pre xformers --index-url https://download.pytorch.org/whl/nightly/cu121 2>/dev/null; then
+    # FIX: Use correct CUDA index URL based on detected architecture
+    echo "📦 [XFORMERS] Attempting pre-compiled installation with correct CUDA version..."
+    echo "🔧 [XFORMERS] Using index: $XFORMERS_INDEX_URL"
+    
+    if "$PIPBIN" install --no-cache-dir --pre xformers --index-url "$XFORMERS_INDEX_URL" 2>/dev/null; then
         echo "✅ [XFORMERS] Pre-compiled installation successful"
+        return 0
+    fi
+    
+    # If pre-compiled fails, try alternative sources
+    echo "🔄 [XFORMERS] Pre-compiled failed, trying alternative sources..."
+    
+    # Try PyPI stable release as fallback
+    if "$PIPBIN" install --no-cache-dir xformers 2>/dev/null; then
+        echo "✅ [XFORMERS] PyPI stable installation successful"
         return 0
     fi
     
@@ -257,6 +274,7 @@ echo "🏗️  [ARCH] Architecture: $ARCH_TAG"
 echo "🏗️  [ARCH] CUDA Tag: $CU_TAG"
 echo "🏗️  [ARCH] Constraints: $CONSTRAINTS_FILE"
 echo "🏗️  [ARCH] Torch Arch List: $TORCH_CUDA_ARCH_LIST"
+echo "🏗️  [ARCH] xFormers Index: $XFORMERS_INDEX_URL"  # NEW: Show the index URL
 
 # Virtual Environment Setup
 VENV_PATH="${VENV_ROOT}/${ARCH_TAG}"
@@ -354,7 +372,7 @@ TORCH_LOCK_FILE="/mnt/netdrive/.torch_install_lock_${ARCH_TAG}"
 
 if "$PYBIN" -c "import torch" &>/dev/null; then
   CURRENT_TORCH=$("$PYBIN" -c "import torch; print(torch.__version__)" 2>/dev/null || echo "")
-  EXPECTED_TORCH=$(grep "^torch==" "$CONSTRAINTS_PATH" | cut -d'=' -f3 | cut -d'+' -f1 || echo "")
+  EXPECTED_TORCH=$(grep "^torch[><=]" "$CONSTRAINTS_PATH" | head -n1 | cut -d'=' -f3 | cut -d'+' -f1 || echo "")
   
   # แยก version number โดยไม่รวม build suffix
   CURRENT_VERSION=$(echo "$CURRENT_TORCH" | cut -d'+' -f1 | cut -d'.' -f1-3)
@@ -368,7 +386,7 @@ if "$PYBIN" -c "import torch" &>/dev/null; then
   echo "🔍 [TORCH] Comparing versions: $CURRENT_MAJOR_MINOR vs $EXPECTED_MAJOR_MINOR"
   
   # ใช้ version comparison ที่ยืดหยุ่นกว่า
-  if [[ "$CURRENT_MAJOR_MINOR" == "$EXPECTED_MAJOR_MINOR" ]] || [[ "$CURRENT_TORCH" == *"$EXPECTED_VERSION"* ]]; then
+  if [[ "$CURRENT_MAJOR_MINOR" == "$EXPECTED_MAJOR_MINOR" ]] || [[ "$CURRENT_TORCH" == *"$EXPECTED_VERSION"* ]] || [[ -z "$EXPECTED_VERSION" ]]; then
     echo "✅ [TORCH] Compatible version installed: $CURRENT_TORCH"
     PACKAGES_INSTALLED=true
   else
@@ -422,21 +440,29 @@ if [[ "$PACKAGES_INSTALLED" == "false" ]]; then
     if uv pip install --python "$PYBIN" --cache-dir "$PIP_CACHE_DIR" -r "/requirements.txt"; then
       echo "✅ [UV] Core requirements installed"
       
-      # Then install architecture-specific packages using UV
+      # Then install architecture-specific packages using UV with correct index
+      echo "🔧 [UV] Installing PyTorch ecosystem with $CU_TAG support..."
       if uv pip install --python "$PYBIN" --cache-dir "$PIP_CACHE_DIR" --constraint "$CONSTRAINTS_PATH" \
-        torch torchvision torchaudio xformers triton; then
+        --index-url "https://download.pytorch.org/whl/${CU_TAG}" \
+        torch torchvision torchaudio; then
         
-        echo "✅ [UV] Architecture-specific packages installed"
+        echo "✅ [UV] PyTorch ecosystem installed"
+        
+        # Install triton separately (may not be in PyTorch index)
+        uv pip install --python "$PYBIN" --cache-dir "$PIP_CACHE_DIR" --constraint "$CONSTRAINTS_PATH" triton || true
+        
         rm -f "$TORCH_LOCK_FILE"
       else
-        echo "⚠️  [UV] Architecture-specific package installation failed, falling back to pip"
+        echo "⚠️  [UV] PyTorch installation failed, falling back to pip"
         # Fallback to regular pip
         if "$PIPBIN" install --no-cache-dir --constraint "$CONSTRAINTS_PATH" \
-          torch torchvision torchaudio xformers triton; then
-          echo "✅ [PIP] Architecture-specific packages installed via fallback"
+          --index-url "https://download.pytorch.org/whl/${CU_TAG}" \
+          torch torchvision torchaudio; then
+          echo "✅ [PIP] PyTorch ecosystem installed via fallback"
+          "$PIPBIN" install --no-cache-dir --constraint "$CONSTRAINTS_PATH" triton || true
           rm -f "$TORCH_LOCK_FILE"
         else
-          echo "[ERROR] Both UV and pip package installation failed"
+          echo "[ERROR] Both UV and pip PyTorch installation failed"
           rm -f "$TORCH_LOCK_FILE"
           exit 1
         fi
@@ -448,12 +474,14 @@ if [[ "$PACKAGES_INSTALLED" == "false" ]]; then
         echo "✅ [PIP] Core requirements installed via fallback"
         
         if "$PIPBIN" install --no-cache-dir --constraint "$CONSTRAINTS_PATH" \
-          torch torchvision torchaudio xformers triton; then
+          --index-url "https://download.pytorch.org/whl/${CU_TAG}" \
+          torch torchvision torchaudio; then
           
-          echo "✅ [PIP] Architecture-specific packages installed via fallback"
+          echo "✅ [PIP] PyTorch ecosystem installed via fallback"
+          "$PIPBIN" install --no-cache-dir --constraint "$CONSTRAINTS_PATH" triton || true
           rm -f "$TORCH_LOCK_FILE"
         else
-          echo "[ERROR] Pip package installation failed"
+          echo "[ERROR] Pip PyTorch installation failed"
           rm -f "$TORCH_LOCK_FILE"
           exit 1
         fi
@@ -468,14 +496,16 @@ if [[ "$PACKAGES_INSTALLED" == "false" ]]; then
     if "$PIPBIN" install --no-cache-dir -r "/requirements.txt"; then
       echo "✅ [DEPS] Core requirements installed"
       
-      # Then install architecture-specific packages
+      # Then install architecture-specific packages with correct CUDA tag
       if "$PIPBIN" install --no-cache-dir --constraint "$CONSTRAINTS_PATH" \
-        torch torchvision torchaudio xformers triton; then
+        --index-url "https://download.pytorch.org/whl/${CU_TAG}" \
+        torch torchvision torchaudio; then
         
-        echo "✅ [DEPS] Architecture-specific packages installed"
+        echo "✅ [DEPS] PyTorch ecosystem installed"
+        "$PIPBIN" install --no-cache-dir --constraint "$CONSTRAINTS_PATH" triton || true
         rm -f "$TORCH_LOCK_FILE"
       else
-        echo "[ERROR] Architecture-specific package installation failed"
+        echo "[ERROR] PyTorch installation failed"
         rm -f "$TORCH_LOCK_FILE"
         exit 1
       fi
@@ -487,9 +517,18 @@ if [[ "$PACKAGES_INSTALLED" == "false" ]]; then
   fi
 fi
 
-# In the main installation section, for Blackwell:
+# Install xFormers for Blackwell with corrected logic
 if [[ "$ARCH_TAG" == "blackwell" ]] && [[ "$SKIP_XFORMERS" != "1" ]]; then
     install_xformers_blackwell
+elif [[ "$ARCH_TAG" != "blackwell" ]] && [[ "$SKIP_XFORMERS" != "1" ]]; then
+    # For non-Blackwell architectures, install xFormers normally
+    echo "🔧 [XFORMERS] Installing xFormers for $ARCH_TAG architecture..."
+    if "$PIPBIN" install --no-cache-dir --constraint "$CONSTRAINTS_PATH" xformers; then
+        echo "✅ [XFORMERS] Installation successful"
+    else
+        echo "⚠️  [XFORMERS] Installation failed, continuing without it"
+        export XFORMERS_DISABLED="1"
+    fi
 fi
 
 # Comprehensive verification
@@ -623,6 +662,7 @@ echo "  🔧 Compute Capability: $GPU_CC_RAW"
 echo "  💾 Memory: $GPU_MEMORY MB" 
 echo "  📦 Virtual Environment: $VENV_PATH"
 echo "  🧬 PyTorch CUDA Arch List: $TORCH_CUDA_ARCH_LIST"
+echo "  🔗 xFormers Index: $XFORMERS_INDEX_URL"
 
 # Start ComfyUI
 cd "$COMFYUI_ROOT"
